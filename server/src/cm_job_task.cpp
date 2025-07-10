@@ -4006,6 +4006,11 @@ ts_paramdump (nvplist *req, nvplist *res, char *_dbmt_error)
       argv[argc++] = "--" PARAMDUMP_BOTH_L;
     }
 
+  if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor >= 1105))
+    {
+      argv[argc++] = "--" PLANDUMP_FOR_CM;
+    }
+
   if (ha_mode != 0)
     {
       append_host_to_dbname (dbname_at_hostname, dbname, sizeof (dbname_at_hostname));
@@ -12928,13 +12933,36 @@ _ts_lockdb_parse_us (nvplist *res, FILE *infile)
 	      nv_add_nvp (res, "numlocked", s1);
 
 	      fgets (buf, sizeof (buf), infile);
-	      scan_matched =
-		      sscanf (buf, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %255s", s2);
-	      if (scan_matched != 1)
+	      if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor < 1104))
 		{
-		  return -1;
+		  scan_matched =
+		      sscanf (buf, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %255s", s2);
+		  if (scan_matched != 1)
+		    {
+		      return -1;
+		    }
+		  nv_add_nvp (res, "maxnumlock", s2);
 		}
-	      nv_add_nvp (res, "maxnumlock", s2);
+	      else
+		{
+		  scan_matched =
+		      sscanf (buf, "%*s %*s %*s %*s %*s %*s %*s %*s %255s", s2);
+		  if (scan_matched != 1)
+		    {
+		      return -1;
+		    }
+		  nv_add_nvp (res, "numallocated", s2);
+
+	          fgets (buf, sizeof (buf), infile);
+		  scan_matched =
+		      sscanf (buf, "%*s %*s %*s %*s %*s %*s %*s %*s %255s", s2);
+		  if (scan_matched != 1)
+		    {
+		      return -1;
+		    }
+		  nv_add_nvp (res, "sizelock", s2);
+		  nv_add_nvp (res, "maxnumlock", "-1");
+		}
 	      flag = 2;
 	    }
 	}            /* end of if (flag == 1) */
