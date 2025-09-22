@@ -1,8 +1,8 @@
 # getcaslogtopresult
 
-Get databases' information in cubrid.
+Get the top result from a CAS log analysis file.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

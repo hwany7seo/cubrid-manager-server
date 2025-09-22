@@ -2,7 +2,7 @@
 
 Get monitoring data.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

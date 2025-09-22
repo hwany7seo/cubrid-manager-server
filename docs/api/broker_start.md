@@ -1,8 +1,8 @@
 # broker_start
 
-The broker_start interface will start specified broker.
+The broker_start interface will start a specified broker.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

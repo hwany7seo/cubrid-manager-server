@@ -2,7 +2,7 @@
 
 Change a role of instance in HA.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

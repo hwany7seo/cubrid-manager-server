@@ -2,7 +2,7 @@
 
 Get auto execution query information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

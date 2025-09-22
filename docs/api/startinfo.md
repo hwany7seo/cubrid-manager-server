@@ -1,13 +1,12 @@
 # startinfo
 
-Get databases' information in cubrid.
+Get information about all databases and their active status.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 
 | **Key** | **Description** |
 | --- | --- |
-
 | task | task name |
 | token | token string encrypted. |
 
@@ -21,17 +20,24 @@ Get databases' information in cubrid.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 
 | **Key** | **Description** |
 | --- | --- |
-
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
 | dblist | the whole databases in the cubrid, including its name and path.  |
-| activelist | get the databaes' name in active status. |
+| activelist | get the database's name in active status. |
+
+### activelist
+
+activelist is composed of objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| active | list of dbname |
 
 
 ## Response Sample

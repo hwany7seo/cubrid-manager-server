@@ -1,8 +1,8 @@
 # loaddb
 
-The loaddb interface will load database from files.
+The loaddb interface will load a database from files.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

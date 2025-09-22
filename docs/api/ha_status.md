@@ -2,7 +2,7 @@
 
 Runs `cubrid heartbeat status` command.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

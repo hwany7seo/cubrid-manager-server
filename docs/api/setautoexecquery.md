@@ -2,7 +2,7 @@
 
 Set a configuration of a query automation.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -12,7 +12,7 @@ Set a configuration of a query automation.
 | planlist | auto-query plan list |
 | queryplan | auto-query plan |
 | query_id | auto-query id |
-| period | the cycle of auto-query, such as weeky, monthly, everyday and "one". |
+| period | the cycle of auto-query, such as weekly, monthly, everyday and "one". |
 | detail | auto-query time (or interval,start with "i", the measurement is minutes) |
 | query_string | sql statement |
 
@@ -40,7 +40,7 @@ Set a configuration of a query automation.
 }
 ```
 #
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -51,11 +51,11 @@ Set a configuration of a query automation.
 #
 ## Response Sample
 
-```
+```json
 {
    "__EXEC_TIME" : "396 ms",
    "note" : "none",
    "status" : "success",
-   "task" : "setautoexecquery",
+   "task" : "setautoexecquery"
 }
 ```

@@ -1,8 +1,8 @@
 # getdbmtuserinfo
 
-The getdbmtuserinfo interface will fetch cubrid manager information.
+The getdbmtuserinfo interface will fetch CUBRID Manager user information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

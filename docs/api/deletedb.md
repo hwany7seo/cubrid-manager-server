@@ -2,9 +2,10 @@
 
 Delete a database.
 
-## Request Json Syntax
+## Request JSON Syntax
 
-| **Ke**y | **Description** |
+| **Key** | **Description** |
+| --- | --- |
 | task | task name |
 | token | token string encrypted. |
 | dbname | database name |
@@ -21,7 +22,7 @@ Delete a database.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

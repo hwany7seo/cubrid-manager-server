@@ -2,7 +2,7 @@
 
 Get auto addvoldb logs.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

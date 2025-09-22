@@ -2,7 +2,7 @@
 
 Get CM/CWM user information
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -18,7 +18,7 @@ Get CM/CWM user information
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -38,7 +38,7 @@ Get CM/CWM user information
 
 ## Response Sample
 
-```
+```json
 {
    "dblist" : 
       {
@@ -56,7 +56,7 @@ Get CM/CWM user information
          "user" : [
             {
                "@id" : "admin",
-               "authority_list" : [ null ,
+               "authority_list" : null,
                "dbauth" : 
                   {
                      "auth_info" : [
@@ -65,8 +65,8 @@ Get CM/CWM user information
                            "dbbrokeraddress" : "10.34.135.62,30000",
                            "dbname" : "demodb"
                         }
-                  }
-               ],
+                  ]
+               },
                "user_auth" : "admin"
             },
             {
@@ -94,12 +94,11 @@ Get CM/CWM user information
                            "dbbrokeraddress" : "localhost, 33000",
                            "dbname" : "db_5"
                         }
-                  }
-               ],
+                  ]
+               },
                "user_auth" : "6"
             }
          ]
       }
-   ]
 }
 ```

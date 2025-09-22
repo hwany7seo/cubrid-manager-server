@@ -2,7 +2,7 @@
 
 Get the monitoring statistic interval.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -18,7 +18,7 @@ Get the monitoring statistic interval.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

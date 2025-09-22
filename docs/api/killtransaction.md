@@ -1,8 +1,8 @@
 # killtransaction
 
-Delete transactions, and return the rest of trasactions infomation.
+Delete transactions, and return the rest of the transactions information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -24,7 +24,7 @@ h -- kill transactions for a specified host name
 p -- kill transactions for a specified program
 s -- kill transactions for a specified SQL ID
 q -- Displays the query-running status of transactions. 
-d  -- dispaly transactions infomation. it doesn't need paramter.
+d  -- display transactions information. it doesn't need parameter.
 other letters should cause an error. 
 ```
 
@@ -43,7 +43,7 @@ other letters should cause an error. 
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -67,7 +67,7 @@ other letters should cause an error. 
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
-   "task" : "gettransactioninfo",
+   "task" : "killtransaction",
    "transactioninfo" : 
       {
          "transaction" : [

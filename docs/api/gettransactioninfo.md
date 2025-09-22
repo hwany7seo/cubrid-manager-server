@@ -1,8 +1,8 @@
 # gettransactioninfo
 
-The gettransactioninfo interface fetches databases transactions information.
+The gettransactioninfo interface fetches database transaction information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -24,7 +24,7 @@ The gettransactioninfo interface fetches databases transactions information.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -42,14 +42,14 @@ The gettransactioninfo interface fetches databases transactions information.
 
 ## Response Sample
 
-```
+```json
 {
    "__EXEC_TIME" : "35 ms",
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "gettransactioninfo",
-   "transactioninfo" : 
+   "transactioninfo" : [
       {
          "transaction" : [
             {
@@ -63,6 +63,7 @@ The gettransactioninfo interface fetches databases transactions information.
                "tran_time" : "0.40",
                "tranindex" : "1(ACTIVE)"
             }
+         ]
       }
    ]
 }

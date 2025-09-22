@@ -2,12 +2,13 @@
 
 Update broker.conf file.
 
-## Request Json Syntax
+## Request JSON Syntax
 
-| **Key** | **Description** |
-| --- | --- |
-| task | task name |
-| token | token string encrypted. |
+| **Key**  | **Description**             |
+| -------- | --------------------------- |
+| task     | task name                   |
+| token    | token string encrypted.     |
+| confdata | content of conf to override |
 
 ## Request Sample
 
@@ -68,5 +69,24 @@ Update broker.conf file.
     "MAX_STRING_LENGTH=-1",
     "ACCESS_LOG=ON"
   ]
+}
+```
+
+## Response JSON Syntax
+
+| **Key** | **Description**                                   |
+| ------- | ------------------------------------------------- |
+| note    | if failed, a brief description will be given here |
+| status  | execution result, success or failed.              |
+| task    | task name                                         |
+
+## Response Sample
+
+```
+{
+  "__EXEC_TIME" : "0 ms",
+  "note" : "none",
+  "status" : "success",
+  "task" : "broker_setparam"
 }
 ```

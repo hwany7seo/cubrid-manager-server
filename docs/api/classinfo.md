@@ -2,7 +2,7 @@
 
 Get the information of tables from a database.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -23,7 +23,7 @@ Get the information of tables from a database.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

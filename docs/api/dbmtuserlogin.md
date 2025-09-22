@@ -1,13 +1,17 @@
 # dbmtuserlogin
 
-The dbmtuserlogin interface will make a session to access by a manager user.
+The dbmtuserlogin interface will create a session to be accessed by a manager user.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| targetid | dbmt user name |
+| dbname | name of database |
+| dbuser | id of db user |
+| dbpasswd | password of db user |
 
 ## Request Sample
 
@@ -20,4 +24,30 @@ The dbmtuserlogin interface will make a session to access by a manager user.
   "dbuser": "dba",
   "dbpasswd": ""
 }
+```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| note | if failed, a brief description will be given here |
+| status | execution result, success or failed. |
+| task | task name |
+| @targetid |	dbmt user name |
+| authority | authority of logged in user |
+| dbname | name of the database |
+
+## Response Sample
+
+```
+{
+   "@targetid" : "admin",
+   "__EXEC_TIME" : "38 ms",
+   "authority" : "isdba",
+   "dbname" : "ha_test",
+   "note" : "none",
+   "status" : "success",
+   "task" : "dbmtuserlogin"
+}
+
 ```

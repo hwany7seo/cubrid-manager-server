@@ -1,8 +1,8 @@
 # restoredb
 
-The restoredb interface will restore database from backup.
+The restoredb interface will restore a database from backup.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

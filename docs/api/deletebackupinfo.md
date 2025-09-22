@@ -2,7 +2,7 @@
 
 Delete a backup meta data.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

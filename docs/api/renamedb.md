@@ -2,7 +2,7 @@
 
 Rename database.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -11,7 +11,7 @@ Rename database.
 | dbname | database name |
 | rename | new database name |
 | exvolpath | extend volume path |
-| advanced | on-off indicating whehter to offer local control files |
+| advanced | on-off indicating whether to offer local control files |
 | forcedel | on-off indicating whether to remove backup files |
 
 ## Request Sample
@@ -29,7 +29,7 @@ Rename database.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

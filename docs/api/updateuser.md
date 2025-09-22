@@ -2,7 +2,7 @@
 
 Update database user information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -21,12 +21,12 @@ Update database user information.
   "dbname":"demodb",
   "username":"yifan",
   "userpass":"1111",
-  "groups": {"group":["public"}],
+  "groups": {"group":["public"]},
   "authorization":[]
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

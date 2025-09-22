@@ -2,7 +2,7 @@
 
 Get broker status.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -20,7 +20,7 @@ Get broker status.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -28,7 +28,7 @@ Get broker status.
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
 | bname | broker name |
-| asinfo | cas' informations |
+| asinfo | cas' information |
 | as_id | cas id |
 | as_pid | cas process id |
 | as_psize | cas process virtual memory size |
@@ -48,10 +48,10 @@ Get broker status.
 
 ## Response Sample
 
-```
+```json
 {
    "__EXEC_TIME" : "51 ms",
-   "asinfo" : 
+   "asinfo" : [
       {
          "as_c" : "0",
          "as_client_ip" : "0.0.0.0",
@@ -152,7 +152,7 @@ Get broker status.
          "as_psize" : "25532",
          "as_status" : "IDLE"
       }
-   ,
+   ],
    "bname" : "query_editor",
    "note" : "none",
    "status" : "success",

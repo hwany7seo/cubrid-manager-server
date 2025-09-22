@@ -1,8 +1,8 @@
 # getcmsenv
 
-Get databases' information in cubrid.
+Get the CUBRID Manager server environment variables.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

@@ -1,8 +1,8 @@
 # deletedbmtuser
 
-The deletedbmtuser interface delete specified manager user.
+The deletedbmtuser interface deletes a specified manager user.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -19,7 +19,7 @@ The deletedbmtuser interface delete specified manager user.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

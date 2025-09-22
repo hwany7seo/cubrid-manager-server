@@ -2,7 +2,7 @@
 
 Close a session between manager server and manager client.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

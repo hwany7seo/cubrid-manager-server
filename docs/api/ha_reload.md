@@ -2,7 +2,7 @@
 
 Runs `cubrid heartbeat reload` command.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -19,7 +19,7 @@ Runs `cubrid heartbeat reload` command.
  }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

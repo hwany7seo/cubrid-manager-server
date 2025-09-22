@@ -1,8 +1,8 @@
 # userinfo
 
-Get Databases' user information in cubrid.
+Get database user information in CUBRID.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -20,7 +20,7 @@ Get Databases' user information in cubrid.
  }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

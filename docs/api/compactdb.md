@@ -2,14 +2,14 @@
 
 Compact database.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
 | dbname | database name |
-| verbose | on-off indicating whether to show detail informations |
+| verbose | on-off indicating whether to show detailed information |
 
 ## Request Sample
 
@@ -22,7 +22,7 @@ Compact database.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

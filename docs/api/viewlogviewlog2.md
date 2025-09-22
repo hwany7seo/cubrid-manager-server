@@ -1,8 +1,8 @@
 # viewlog/viewlog2
 
-Viwe specified log file.
+View specified log file.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -25,7 +25,7 @@ Viwe specified log file.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

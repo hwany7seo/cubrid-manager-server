@@ -2,7 +2,7 @@
 
 Runs `cubrid heartbeat list` command.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

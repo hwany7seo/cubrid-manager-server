@@ -2,11 +2,11 @@
 
 Monitor CMS process status.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
-| task | list_dir |
+| task | monitorprocess |
 | token | token string encrypted. |
 
 ## Request Sample
@@ -18,20 +18,20 @@ Monitor CMS process status.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
-| cub_master | the value should be "exist" or "don't exist" in order to indicate whether this process exists. |
+| cub_master | the value should be "exist" or "does not exist" in order to indicate whether this process exists. |
 
 ## Response Sample
 
 ```
 {
-  "cub_master": "don't exist",
+  "cub_master": "does not exist",
   "note": "none",
   "status": "success",
   "task": "monitorprocess"

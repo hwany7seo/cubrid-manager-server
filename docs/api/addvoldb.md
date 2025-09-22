@@ -1,8 +1,8 @@
 # addvoldb
 
-Add new volume.
+Add a new volume.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -11,7 +11,7 @@ Add new volume.
 | dbname | database name |
 | volname | volume name |
 | purpose | generic, data, index, temp |
-| size_need_mb | size of MB |
+| size_need_mb | size of the volume in megabytes (MB) |
 
 ## Request Sample
 
@@ -21,11 +21,11 @@ Add new volume.
   "dbname":"demodb",
   "volname":"testvol",
   "purpose":"generic",
-  "size_need_mb":"500(MB)"
+  "size_need_mb":"500"
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

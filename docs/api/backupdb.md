@@ -1,8 +1,8 @@
 # backupdb
 
-The backupdb interface will create databases backup file.
+The backupdb interface will create a database backup file.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

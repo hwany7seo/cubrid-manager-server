@@ -2,7 +2,7 @@
 
 Create a session by manager user.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

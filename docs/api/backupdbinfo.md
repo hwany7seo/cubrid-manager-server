@@ -1,8 +1,8 @@
 # backupdbinfo
 
-The backupdbinfo interface will get databases backup information.
+The backupdbinfo interface will get database backup information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

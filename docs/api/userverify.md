@@ -1,8 +1,8 @@
 # userverify
 
-Check whether or not an user is valid.
+Check whether or not a user is valid.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -24,7 +24,7 @@ Check whether or not an user is valid.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

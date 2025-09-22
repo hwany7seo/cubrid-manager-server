@@ -2,7 +2,7 @@
 
 Copy database.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -12,8 +12,8 @@ Copy database.
 | destdbname | destination database |
 | exvolpath | extend volume path |
 | logpath | log volume path |
-| overwrite | on-off indicating whether to replace existed database |
-| move | on-off indicating whether to remove existed database |
+| overwrite | on-off indicating whether to replace existing database |
+| move | on-off indicating whether to remove existing database |
 | advanced | on-off indicating whether to offer local control files |
 
 ## Request Sample
@@ -33,7 +33,7 @@ Copy database.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

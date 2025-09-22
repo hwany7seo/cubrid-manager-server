@@ -2,7 +2,7 @@
 
 Get database mode.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

@@ -2,7 +2,7 @@
 
 Add an auto-backup plan
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -18,7 +18,7 @@ Add an auto-backup plan
 | storeold | on-off indicating whether to delete old files |
 | zip | on-off indicating whether to zip in auto-backup |
 | updatestatus | on-off indicating whether to update statistic infromation |
-| check | on-off indicating whehter to start consistency check |
+| check | on-off indicating whether to start consistency check |
 | mt | the number of auto-backup threads |
 
 ## Request Sample
@@ -44,7 +44,7 @@ Add an auto-backup plan
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

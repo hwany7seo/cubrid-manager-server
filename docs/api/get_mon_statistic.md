@@ -1,8 +1,8 @@
 # get_mon_statistic
 
-Get mornitoring statistic data.
+Get monitoring statistic data.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 Get DB monitoring statistic data(HA monitoring data is included)
 
@@ -52,7 +52,7 @@ Get DB monitoring statistic data(HA monitoring data is included)
 {
   "task":"get_mon_statistic",
   "token":"4504b930fc1be99bf5dfd31fc5799faaa3f117fb903f397de087cd3544165d857926f07dd201b6aa",
-  "metric": "db_hit_radio", 
+  "metric": "db_hit_ratio", 
   "dbname": "db1"
   }
 ```
@@ -74,10 +74,10 @@ Get DB Volume monitoring statistic data
 ```
 {
   "task":"get_mon_statistic",
-  “metric”:”vol_freespace”,
-  “dtype”:”yearly”,
-  “dbname”:”db1”,
-  “volname”:”testdb”,
+  "metric":"vol_freespace",
+  "dtype":"yearly",
+  "dbname":"db1",
+  "volname":"testdb",
    "token":"xxxxxxx"
 }
 ```
@@ -87,13 +87,13 @@ Get os monitoring statistics data
 ```
 {
   "task":"get_mon_statistic",
-  “metric”:”os_cpu_user”,
-  “dtype”:”weekly",
+  "metric":"os_cpu_user",
+  "dtype":"weekly",
    "token":"xxxxxxx"
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -108,14 +108,14 @@ Get os monitoring statistics data
 
 ## Response Sample
 
-```
+```json
 {
   "task":"get_mon_statistic",
-  “metric”:”broker_long_t”,
-  “dtype”:”monthly”, 
-  “bname”:”broker1”,
-  “status”: “success”,
-  “note”:”none”,
-  “data”:11,17,23,42,24,12,15…
+  "metric":"broker_long_t",
+  "dtype":"monthly", 
+  "bname":"broker1",
+  "status": "success",
+  "note":"none",
+  "data":[11,17,23,42,24,12,15]
 }
 ```

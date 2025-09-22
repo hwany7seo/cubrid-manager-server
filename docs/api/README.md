@@ -6,9 +6,9 @@ The CUBRID Manager Server (CMS) HTTP Interface is an interface that exists betwe
 
 ## System Architecture
 
-CMS is a manager tools for CUBRID including database configure, monitor, SQL query. As the component of the CUBRID Database Management System, CMS provides a web-based tool that allows users to remotely manage the database and the Broker.
+CMS is a manager tools for CUBRID including database configure, monitor, SQL query. As a component of the CUBRID Database Management System, CMS provides a web-based tool that allows users to remotely manage the database and the Broker.
 
-![CMS Architecture](images/architecture.png?raw=true "CMS Architecture")
+![CMS Architecture](images/architecture.png)
 CMS Architecture
 
 ## Writing HTTP Application Program
@@ -34,14 +34,14 @@ r = conn.getresponse()
 print (r.read())
 ```
 
-The client will receive response in json-format. If success, `status` is `success`, otherwise `failure` and `note` will give error reason. The data `token` will be used in following request.
+The client will receive response in JSON-format. If success, `status` is `success`, otherwise `failure` and `note` will give error reason. The data `token` will be used in following request.
 
 ```
 {
-    "note" : "none",
-    "status" : "success",
-    "task" : "authenticate",
-    "token" : "ae873897a0a9a2af8ea817532a4d722b124c446cb75876b9924a258f6351977e7926f07dd201b6aa"
+	   "note" : "none",
+	   "status" : "success",
+ 	   "task" : "authenticate",
+	   "token" : "ae873897a0a9a2af8ea817532a4d722b124c446cb75876b9924a258f6351977e7926f07dd201b6aa"
 }
 ```
 
@@ -62,7 +62,7 @@ There are seven permissions. These permissions can indicate which authorities ar
 
 ## CMS Interfaces
 
-CMs Interfaces are conposed by Json and is used for communication between CMS and Cubrid Manager.
+CMS Interfaces are composed by JSON and is used for communication between CMS and Cubrid Manager.
 
 ### Broker
 
@@ -105,11 +105,9 @@ CMs Interfaces are conposed by Json and is used for communication between CMS an
 | [getdbprocstat](getdbprocstat.md) | socket, http | ALL_AUTHORITY |
 | [changemode](changemode.md) | socket, http | DBC, DBO |
 | [getdbmode](getdbmode.md) | socket, http | ALL_AUTHORITY |
-| [dbspace](dbspace.md) | socket, http | ALL_AUTHORITY |
 | [addvoldb](addvoldb.md) | socket, http | DBC, DBO |
 | [class](class.md) | socket, http | ALL_AUTHORITY |
 | [classinfo](classinfo.md) | socket, http | ALL_AUTHORITY |
-| [updateattribute](updateattribute.md) | socket, http | ALL_AUTHORITY |
 | [start_statdump](start_statdump.md) | socket, http | DBO |
 | [stop_statdump](stop_statdump.md) | socket, http | DBO |
 
@@ -134,9 +132,6 @@ CMs Interfaces are conposed by Json and is used for communication between CMS an
 | [adddbmtuser](adddbmtuser.md) | socket, http | DBC |
 | [getaddvolstatus](getaddvolstatus.md) | socket, http | ALL_AUTHORITY |
 | [dbmtuserlogin](dbmtuserlogin.md) | socket, http | ALL_AUTHORITY |
-| [adddbmtuser_new](adddbmtuser_new.md) | http | DBC |
-| [updatedbmtuser_new](updatedbmtuser_new.md) | http | DBC, DBO |
-| [getdbmtuserinfo_new](getdbmtuserinfo_new.md) | http | DBC, DBO |
 
 ### Transaction
 
@@ -167,11 +162,6 @@ CMs Interfaces are conposed by Json and is used for communication between CMS an
 | [setautoaddvol](setautoaddvol.md) | socket, http | DBC, DBO |
 | [getautoexecquery](getautoexecquery.md) | socket, http | ALL_AUTHORITY |
 | [setautoexecquery](setautoexecquery.md) | socket, http | DBC, DBO, JOB |
-| [setautostart](setautostart.md) | http | DBC, DBO, JOB |
-| [getautostart](getautostart.md) | http | ALL_AUTHORITY |
-| [getautojobconf](getautojobconf.md) | http | ALL_AUTHORITY |
-| [setautojobconf](setautojobconf.md) | http | DBC, DBO, JOB |
-| [execautostart](execautostart.md) | http | ALL_AUTHORITY |
 
 ### HA
 
@@ -220,7 +210,6 @@ CMs Interfaces are conposed by Json and is used for communication between CMS an
 | [plandump](plandump.md) | socket, http | ALL_AUTHORITY |
 | [paramdump](paramdump.md) | socket, http | ALL_AUTHORITY |
 | [statdump](statdump.md) | socket, http | ALL_AUTHORITY |
-| [unloaddbinfo](unloaddbinfo.md) | socket, http | ALL_AUTHORITY |
 | [backupvolinfo](backupvolinfo.md) | socket, http | ALL_AUTHORITY |
 | [getdiagdata](getdiagdata.md) | socket, http | ALL_AUTHORITY |
 | [getstandbyserverstat](getstandbyserverstat.md) | socket, http | ALL_AUTHORITY |

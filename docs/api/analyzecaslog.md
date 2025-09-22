@@ -1,8 +1,8 @@
 # analyzecaslog
 
-The analyzecaslog interface will fetch top list to parse broker sql log(s) with the broker_log_top utility.
+The analyzecaslog interface will fetch a top list to parse broker SQL log(s) with the broker_log_top utility.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -24,7 +24,7 @@ The analyzecaslog interface will fetch top list to parse broker sql log(s) with 
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

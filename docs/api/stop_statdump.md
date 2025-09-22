@@ -2,7 +2,7 @@
 
 Related with [start_statdump](start_statdump.md), deactivate the previously started *statdump* process
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -18,13 +18,13 @@ Related with [start_statdump](start_statdump.md), deactivate the previously star
 {
   "task":"stop_statdump",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
-  "dbname": "demodb"
+  "dbname": "demodb",
   "dbuser":"dba",
   "dbpasswd":""
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

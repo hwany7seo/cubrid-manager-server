@@ -2,7 +2,7 @@
 
 Get backup info.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

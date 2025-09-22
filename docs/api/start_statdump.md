@@ -2,7 +2,7 @@
 
 Activate *background* statdump process to accumulate values per seconds, to stop it use [stop_statdump](stop_statdump.md)
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -15,18 +15,18 @@ Activate *background* statdump process to accumulate values per seconds, to stop
 
 ## Request Sample
 
-```
+```json
 {
   "task":"start_statdump",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
-  "dbname": "demodb"
+  "dbname": "demodb",
   "dbuser":"dba",
   "dbpasswd":"",
   "interval":"5"
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

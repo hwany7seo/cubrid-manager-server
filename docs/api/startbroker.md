@@ -1,15 +1,15 @@
 # startbroker
 
-The startbroker interface start all brokers of databases.
+The startbroker interface starts all brokers of databases.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
 
-## Request Sampl
+## Request Sample
 
 ```
 {
@@ -18,7 +18,7 @@ The startbroker interface start all brokers of databases.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

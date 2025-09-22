@@ -1,8 +1,8 @@
 # getdbsize
 
-Get databases size information.
+Get database size information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

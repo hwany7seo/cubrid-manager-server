@@ -1,8 +1,8 @@
 # backupvolinfo
 
-The backupvolinfo interface will get databases backup volume information.
+The backupvolinfo interface will get database backup volume information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

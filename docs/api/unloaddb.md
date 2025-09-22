@@ -1,8 +1,8 @@
 # unloaddb
 
-The unloaddb interface will unload database server.
+The unloaddb interface will unload a database server.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -23,7 +23,7 @@ The unloaddb interface will unload database server.
 | delimit | use '"' where an identifier begins and ends; default: don't use |
 | estimate | estimated NUMBER of instances; default: auto computed |
 | prefix | PREFIX for output files; default: the database name |
-| cach | NUMBER of cached pages; default: 100 |
+| cache | NUMBER of cached pages; default: 100 |
 | lofile | lo file COUNT per a directory; default: 0 |
 
 ## Request Sample

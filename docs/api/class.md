@@ -1,8 +1,8 @@
 # class
 
-The class interface will get summary databases class information.
+The class interface will get summary database class information.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -22,7 +22,7 @@ The class interface will get summary databases class information.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -35,7 +35,7 @@ The class interface will get summary databases class information.
 | type | field type |
 | owner | database table owner |
 | virtual | indicate whether it is a view |
-| attribute | fields infomation list |
+| attribute | fields information list |
 | name | field name |
 | inherit | which class(table) the field belong to |
 | indexed | whether it is a index field |
@@ -45,10 +45,10 @@ The class interface will get summary databases class information.
 
 ## Response Sample
 
-```
+```json
 {
    "__EXEC_TIME" : "116 ms",
-   "classinfo" : 
+   "classinfo" : [
       {
          "attribute" : [
             {
@@ -71,7 +71,7 @@ The class interface will get summary databases class information.
                "type" : "character varying(40960)",
                "unique" : "n"
             }
-         ,
+         ],
          "classname" : "table1",
          "dbname" : "testdb",
          "owner" : "PUBLIC",

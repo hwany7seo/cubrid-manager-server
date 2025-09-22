@@ -1,8 +1,8 @@
 # broker_restart
 
-The broker_restart interface will restart specified broker.
+The broker_restart interface will restart a specified broker.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

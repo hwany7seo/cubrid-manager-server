@@ -1,8 +1,8 @@
 # deletebroker
 
-The deletebroker interface delete specified database broker.
+The deletebroker interface deletes a specified database broker.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -19,7 +19,7 @@ The deletebroker interface delete specified database broker.
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

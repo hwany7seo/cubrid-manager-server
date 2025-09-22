@@ -2,7 +2,7 @@
 
 Get auto addvol info.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

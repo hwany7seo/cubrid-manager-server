@@ -1,8 +1,8 @@
 # gethaapplyinfo
 
-Get copylog and apply log operations information
+Get copylog and applylog operations information
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
@@ -24,7 +24,7 @@ Get copylog and apply log operations information
 }
 ```
 
-## Response Json Syntax
+## Response JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

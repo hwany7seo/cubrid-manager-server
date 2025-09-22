@@ -2,7 +2,7 @@
 
 Get auto backup error logs.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |

@@ -2,7 +2,7 @@
 
 Delete access log files.
 
-## Request Json Syntax
+## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
