@@ -463,12 +463,36 @@ class async_request
     Json::Value response;
     int status;
 #ifndef WINDOWS
-    pthread_mutex_t *mutex;
-    pthread_cond_t *cond;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int refcount;
 #endif
 };
 
 list < async_request * >request_list;
+
+#ifndef WINDOWS
+/* Decrement the reference count of an async_request that is shared between
+ * the caller thread and the worker thread.  The last owner to release it
+ * destroys the synchronization primitives and frees the object.  This lets
+ * the worker keep running (and clean up after itself) even after the caller
+ * has given up waiting on a timeout, instead of leaving the worker to touch
+ * the caller's already-destroyed stack. */
+static void
+async_request_release (async_request *p)
+{
+  int remaining;
+  pthread_mutex_lock (&p->mutex);
+  remaining = --p->refcount;
+  pthread_mutex_unlock (&p->mutex);
+  if (remaining == 0)
+    {
+      pthread_cond_destroy (&p->cond);
+      pthread_mutex_destroy (&p->mutex);
+      delete p;
+    }
+}
+#endif
 
 #ifdef WINDOWS
 DWORD WINAPI
@@ -499,14 +523,20 @@ cm_async_request_handler (void *lpArg)
       response["note"] = e.what ();
     }
 
-  async_param->status = 1;
   nv_destroy (cli_request);
   nv_destroy (cli_response);
 
 #ifndef WINDOWS
-  pthread_mutex_lock (async_param->mutex);
-  pthread_cond_broadcast (async_param->cond);
-  pthread_mutex_unlock (async_param->mutex);
+  pthread_mutex_lock (&async_param->mutex);
+  async_param->status = 1;
+  pthread_cond_broadcast (&async_param->cond);
+  pthread_mutex_unlock (&async_param->mutex);
+
+  /* Release the worker's reference; frees the object if the caller already
+   * timed out and released its own reference. */
+  async_request_release (async_param);
+#else
+  async_param->status = 1;
 #endif
 
   return NULL;
@@ -563,12 +593,12 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
                           unsigned long time_out = 600)
 {
   int err = 0;
+  int rc = ERR_NO_ERROR;
+  int completed;
   pthread_t async_thrd;
 #if defined(AIX)
   pthread_attr_t thread_attr;
 #endif
-  pthread_cond_t cond;
-  pthread_mutex_t mutex;
   timespec to;
   static unsigned int req_id = 0;
   async_request *pstmt = (async_request *) new (async_request);
@@ -577,17 +607,25 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
       return ERR_MEM_ALLOC;
     }
 
-  err = pthread_mutex_init (&mutex, NULL);
+  /* The mutex and condition variable are embedded in the heap-allocated
+   * request object (shared with the worker thread) rather than living on
+   * this function's stack.  Otherwise, when the caller returns on timeout,
+   * the worker would later dereference these primitives on a destroyed
+   * stack frame and crash with a general protection fault. */
+  err = pthread_mutex_init (&pstmt->mutex, NULL);
   if (err != 0)
     {
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread mutex.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
 
-  err = pthread_cond_init (&cond, NULL);
+  err = pthread_cond_init (&pstmt->cond, NULL);
   if (err != 0)
     {
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread condition.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
@@ -598,13 +636,15 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
 
   pstmt->uuid = req_id++;
 
-  pstmt->mutex = &mutex;
-  pstmt->cond = &cond;
+  pstmt->refcount = 2;		/* caller + worker */
 
 #if defined(AIX)
   err = pthread_attr_init (&thread_attr);
   if (err != 0)
     {
+      pthread_cond_destroy (&pstmt->cond);
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread attribute.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
@@ -613,6 +653,10 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   err = pthread_attr_setdetachstate (&thread_attr, PTHREAD_CREATE_DETACHED);
   if (err != 0)
     {
+      pthread_attr_destroy (&thread_attr);
+      pthread_cond_destroy (&pstmt->cond);
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread detach state.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
@@ -624,6 +668,10 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   err = pthread_attr_setscope (&thread_attr, PTHREAD_SCOPE_PROCESS);
   if (err != 0)
     {
+      pthread_attr_destroy (&thread_attr);
+      pthread_cond_destroy (&pstmt->cond);
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread scope.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
@@ -632,51 +680,77 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   err = pthread_attr_setstacksize (&thread_attr, AIX_STACKSIZE_PER_THREAD);
   if (err != 0)
     {
+      pthread_attr_destroy (&thread_attr);
+      pthread_cond_destroy (&pstmt->cond);
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       LOG_ERROR ("cm_execute_request_async : fail to set thread stack size.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
 
   err = pthread_create (&async_thrd, &thread_attr, cm_async_request_handler, pstmt);
+  pthread_attr_destroy (&thread_attr);
 #else /* except AIX */
   err = pthread_create (&async_thrd, NULL, cm_async_request_handler, pstmt);
 #endif
 
   if (err != 0)
     {
+      pthread_cond_destroy (&pstmt->cond);
+      pthread_mutex_destroy (&pstmt->mutex);
       delete (pstmt);
-      pthread_mutex_destroy (&mutex);
-      pthread_cond_destroy (&cond);
       LOG_ERROR ("cm_execute_request_async : fail to create thread.");
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
-  pthread_mutex_lock (&mutex);
+
+#if !defined(AIX)
+  /* The worker frees the shared request object by itself (via the reference
+   * count), so it is never joined; detach it to avoid leaking thread
+   * resources when the caller gives up on timeout. */
+  pthread_detach (async_thrd);
+#endif
+
   to.tv_sec = time (NULL) + time_out;
   to.tv_nsec = 0;
-  err = pthread_cond_timedwait (&cond, &mutex, &to);
-//  err = pthread_cond_wait (&cond, &mutex);
-  pthread_mutex_unlock (&mutex);
-  if (err == ETIMEDOUT)
+
+  pthread_mutex_lock (&pstmt->mutex);
+  while (pstmt->status == 0)
+    {
+      err = pthread_cond_timedwait (&pstmt->cond, &pstmt->mutex, &to);
+      if (err == ETIMEDOUT)
+        {
+          break;
+        }
+    }
+  completed = (pstmt->status != 0);
+  if (completed)
+    {
+      response = pstmt->response;
+    }
+  pthread_mutex_unlock (&pstmt->mutex);
+
+  if (!completed)
     {
       string dbname, task_name;
 
       task_name = request.get ("task", "unknown").asString();
       dbname = request.get ("dbname", "").asString();
 
+      /* uuid is set once before the worker starts and never changes, so it
+       * is safe to read here without the lock. */
       response["uuid"] = pstmt->uuid;
       LOG_ERROR ("cm_execute_request_async : Timeout %ld secs: task '%s'. %s",
 		time_out, task_name.c_str(), dbname.c_str ());
-      return build_server_header (response, ERR_WITH_MSG, "timeout");
+      rc = build_server_header (response, ERR_WITH_MSG, "timeout");
     }
 
-  pthread_join (async_thrd, NULL);
-
-  pthread_mutex_destroy (&mutex);
-  pthread_cond_destroy (&cond);
-  response = pstmt->response;
-  delete (pstmt);
-  return ERR_NO_ERROR;
+  /* Release the caller's reference.  If the worker already finished this
+   * frees the object; otherwise the worker frees it when it completes.
+   * Do not touch pstmt after this point. */
+  async_request_release (pstmt);
+  return rc;
 }
 #endif
 
