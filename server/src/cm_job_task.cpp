@@ -11581,14 +11581,19 @@ ts_logout (nvplist *req, nvplist *res, char *_dbmt_error)
   nv_update_val (res, "note", "");
 
   token = nv_get_val (req, "token");
+  /* 삭제(리스트 unlink) + FREE_MEM 을 세션 락으로 원자화하여
+   * 동시 검증(search+deref)과의 use-after-free 를 방지한다. */
+  dbmt_user_session_lock ();
   removed_node = dbmt_user_delete_token_info_by_token (token);
 
   if (removed_node == NULL)
     {
+      dbmt_user_session_unlock ();
       return ERR_INVALID_TOKEN;
     }
 
   FREE_MEM (removed_node);
+  dbmt_user_session_unlock ();
 
   return ERR_NO_ERROR;
 }

@@ -26,6 +26,8 @@
 #include <assert.h>
 #include <signal.h>
 #include <list>
+#include <map>
+#include <string>
 
 #ifdef WINDOWS
 #include <process.h>
@@ -40,6 +42,7 @@
 #include "cm_server_extend_interface.h"
 #include "cm_log.h"
 #include "cm_mon_stat.h"
+#include "cm_user.h"
 
 using namespace std;
 
@@ -57,6 +60,50 @@ typedef struct
   // char cubrid_charset[MAX_PATH];
 } cubrid_env_t;
 mutex_t cm_mutex;
+
+/*
+ * task 별 락. 전역 cm_mutex 하나로 모든 cm_api 를 직렬화하던 것을 task 단위로 분리한다.
+ * cm_task_locks 맵 자체는 cm_task_map_mutex 로 짧게 보호하고, 반환된 task 락 포인터는
+ * 맵 수명 동안 안정적이다. (task 락은 프로세스 수명 동안 유지)
+ */
+static std::map<std::string, mutex_t *> cm_task_locks;
+mutex_t cm_task_map_mutex;
+
+static mutex_t *
+get_task_lock (const std::string &task)
+{
+  mutex_t *m;
+
+  mutex_lock (cm_task_map_mutex);
+  std::map<std::string, mutex_t *>::iterator it = cm_task_locks.find (task);
+  if (it == cm_task_locks.end ())
+    {
+      m = (mutex_t *) malloc (sizeof (mutex_t));
+      mutex_init (*m);
+      cm_task_locks[task] = m;
+    }
+  else
+    {
+      m = it->second;
+    }
+  mutex_unlock (cm_task_map_mutex);
+
+  return m;
+}
+
+/* 비동기 요청 uuid 발급용 원자적 카운터 (task 락과 무관하게 전역 공유) */
+static unsigned int g_req_id_counter = 0;
+
+static unsigned int
+cm_next_req_id (void)
+{
+#ifdef WINDOWS
+  return (unsigned int) InterlockedIncrement ((LONG volatile *) &g_req_id_counter) - 1;
+#else
+  return __sync_fetch_and_add (&g_req_id_counter, 1);
+#endif
+}
+
 /*global cubrid env*/
 cubrid_env_t cub_httpd_env;
 
@@ -162,6 +209,8 @@ cub_cm_init_env ()
   }
   */
   mutex_init (cm_mutex);
+  mutex_init (cm_task_map_mutex);
+  dbmt_user_session_lock_init ();
   return;
 }
 
@@ -169,6 +218,7 @@ void
 cub_cm_destory_env ()
 {
   mutex_destory (cm_mutex);
+  mutex_destory (cm_task_map_mutex);
 }
 
 int
@@ -520,7 +570,7 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   HANDLE hHandles;
   DWORD ThreadID;
   DWORD dwWaitResult;
-  static unsigned int req_id = 0;
+  /* uuid 는 원자적 전역 카운터(cm_next_req_id)로 발급 */
   async_request *pstmt = (async_request *) new (async_request);
   if (pstmt == NULL)
     {
@@ -529,7 +579,7 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
 
   pstmt->request = request;
   pstmt->status = 0;
-  pstmt->uuid = req_id++;
+  pstmt->uuid = cm_next_req_id ();
 
   hHandles =
     CreateThread (NULL, 0, cm_async_request_handler, pstmt, 0, &ThreadID);
@@ -570,7 +620,7 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   pthread_cond_t cond;
   pthread_mutex_t mutex;
   timespec to;
-  static unsigned int req_id = 0;
+  /* uuid 는 원자적 전역 카운터(cm_next_req_id)로 발급 */
   async_request *pstmt = (async_request *) new (async_request);
   if (pstmt == NULL)
     {
@@ -596,7 +646,7 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   pstmt->request = request;
   pstmt->status = 0;
 
-  pstmt->uuid = req_id++;
+  pstmt->uuid = cm_next_req_id ();
 
   pstmt->mutex = &mutex;
   pstmt->cond = &cond;
@@ -722,15 +772,18 @@ cub_check_async_status (Json::Value &request, Json::Value &response)
 int
 cub_cm_request_handler (Json::Value &request, Json::Value &response)
 {
+  string task = request["task"].asString ();
+  mutex_t *task_lock;
 
-  mutex_lock (cm_mutex);
-
-
+  /* 토큰 검증은 세션 리스트(user_token_info)에 접근하므로 세션 전용 락으로 보호한다.
+   * (task 락은 서로 다른 락이라 이 공유 리스트를 보호하지 못함) */
   // leave a back door for testing...
-  if (ext_ut_validate_token (request, response) != ERR_NO_ERROR && request["token"].asString() != "test")
+  dbmt_user_session_lock ();
+  int token_err = ext_ut_validate_token (request, response);
+  dbmt_user_session_unlock ();
+  if (token_err != ERR_NO_ERROR && request["token"].asString() != "test")
     {
-      response["task"] = request["task"].asString();
-      mutex_unlock (cm_mutex);
+      response["task"] = task;
       return 1;
     }
 
@@ -738,25 +791,28 @@ cub_cm_request_handler (Json::Value &request, Json::Value &response)
   if (!ext_ut_validate_auth (request) && request["token"].asString() != "test")
     {
       response["status"] = STATUS_FAILURE;
-      response["note"] = "The user don't have authority to execute the task: " + request["task"].asString();
-      response["task"] = request["task"].asString();
-
-      mutex_unlock (cm_mutex);
+      response["note"] = "The user don't have authority to execute the task: " + task;
+      response["task"] = task;
       return 1;
     }
 
+  /* 전역 직렬화 대신 task 단위 락: 서로 다른 task 는 동시에 처리된다.
+   * (같은 task 끼리는 여전히 직렬 - 대용량 task 의 async 화는 별도 작업) */
+  task_lock = get_task_lock (task);
+  mutex_lock (*task_lock);
+
   if (cub_check_async_status (request, response))
     {
-      mutex_unlock (cm_mutex);
+      mutex_unlock (*task_lock);
       return 1;
     }
   if (cub_cm_extend_request (request, response))
     {
-      mutex_unlock (cm_mutex);
+      mutex_unlock (*task_lock);
       return 1;
     }
   cm_execute_request_async (request, response, sco.iHttpTimeout);
 
-  mutex_unlock (cm_mutex);
+  mutex_unlock (*task_lock);
   return 1;
 }

@@ -2495,27 +2495,45 @@ ut_validate_token (nvplist *req)
 
   ut_access_log (req, id);
 
+  ut_get_token_active_time (&active_time);
+
+  /* 세션 락 안에서 search + 토큰비교 + 만료검사 + login_time 갱신을 원자적으로 수행.
+   * 로그는 락 해제 후 상태값(vstate)에 따라 남긴다. */
+  int vstate = 0;   /* 0:ok 1:not found 2:mismatch 3:expired */
+  dbmt_user_session_lock ();
   token_info = dbmt_user_search_token_info (id);
   if (token_info == NULL)
+    {
+      vstate = 1;
+    }
+  else if (strcmp (token_info->token, token))
+    {
+      vstate = 2;
+    }
+  else if (now_time - token_info->login_time > active_time)
+    {
+      vstate = 3;
+    }
+  else
+    {
+      token_info->login_time = now_time;
+    }
+  dbmt_user_session_unlock ();
+
+  if (vstate == 1)
     {
       ut_access_log (req, "can't find registered token.");
       return 0;
     }
-
-  if (strcmp (token_info->token, token))
+  if (vstate == 2)
     {
       ut_access_log (req, "tokens aren't equal!");
       return 0;
     }
-
-  ut_get_token_active_time (&active_time);
-
-  if (now_time - token_info->login_time > active_time)
+  if (vstate == 3)
     {
       return 0;
     }
-
-  token_info->login_time = now_time;
 
   nv_add_nvp (req, "_IP", ip);
   nv_add_nvp (req, "_PORT", port);
@@ -2589,8 +2607,10 @@ _accept_connection (nvplist *cli_request, nvplist *cli_response)
   dbmt_con_add (client_ip, client_port, client_ver, client_id);
 
   ut_access_log (cli_request, "before add token into token list.");
+  dbmt_user_session_lock ();
   dbmt_user_new_token_info (client_id, client_ip, client_port, pstrbuf,
                             proc_id, login_time);
+  dbmt_user_session_unlock ();
 
   free (pstrbuf);
   return;

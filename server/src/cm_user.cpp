@@ -36,6 +36,7 @@
 #include "cm_config.h"
 #include "cm_server_util.h"
 #include "cm_user.h"
+#include "cm_log.h"
 
 #define CUBRID_PASS_OPEN_TAG         "<<<:"
 #define CUBRID_PASS_OPEN_TAG_LEN     strlen(CUBRID_PASS_OPEN_TAG)
@@ -44,6 +45,31 @@
 
 
 T_USER_TOKEN_INFO *user_token_info = NULL;
+
+/*
+ * user_token_info(세션 리스트) 전용 락.
+ * search/new/delete 등 저수준 함수는 스스로 잠그지 않고, 호출부(검증/login/logout)가
+ * search+RMW 구간 전체를 이 락으로 감싼다. (호출부가 저수준 함수를 감싸므로 중첩 없음)
+ */
+static mutex_t dbmt_session_mutex;
+
+void
+dbmt_user_session_lock_init (void)
+{
+  mutex_init (dbmt_session_mutex);
+}
+
+void
+dbmt_user_session_lock (void)
+{
+  mutex_lock (dbmt_session_mutex);
+}
+
+void
+dbmt_user_session_unlock (void)
+{
+  mutex_unlock (dbmt_session_mutex);
+}
 
 int
 dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)

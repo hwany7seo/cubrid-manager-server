@@ -110,4 +110,13 @@ T_USER_TOKEN_INFO *dbmt_user_search_token_info_by_token (const char *token);
 T_USER_TOKEN_INFO *dbmt_user_delete_token_info (const char *user_id);
 T_USER_TOKEN_INFO *dbmt_user_delete_token_info_by_token (const char *token);
 
+/*
+ * 세션(토큰) 리스트(user_token_info) 전용 락.
+ * per-task 락으로는 여러 task가 공유하는 이 리스트를 보호할 수 없으므로
+ * 검증(search+login_time 갱신)/login(추가)/logout(삭제) 구간을 이 락으로 감싼다.
+ */
+void dbmt_user_session_lock_init (void);
+void dbmt_user_session_lock (void);
+void dbmt_user_session_unlock (void);
+
 #endif                /* _CM_USER_H_ */

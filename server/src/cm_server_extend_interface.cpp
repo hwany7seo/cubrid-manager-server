@@ -2429,28 +2429,24 @@ bool ext_ut_validate_token (const char *token)
   int i = 0;
   while (getline (tmp_iss, token_content[i++], ':'));
 
-  token_info = dbmt_user_search_token_info (token_content[2].c_str());
-  if (token_info == NULL)
-    {
-      return false;
-    }
-
-  if (strcmp (token_info->token, token) != 0)
-    {
-      return false;
-    }
-
   if (!_validate_token_active_time (active_time))
     {
       active_time = 7200;
     }
 
-  if (now_time - token_info->login_time > active_time)
+  /* 세션 락 안에서 search + 토큰비교 + 만료검사 + login_time 갱신을 원자적으로 수행. */
+  dbmt_user_session_lock ();
+  token_info = dbmt_user_search_token_info (token_content[2].c_str());
+  if (token_info == NULL
+      || strcmp (token_info->token, token) != 0
+      || now_time - token_info->login_time > active_time)
     {
+      dbmt_user_session_unlock ();
       return false;
     }
 
   token_info->login_time = now_time;
+  dbmt_user_session_unlock ();
 
   return true;
 }
@@ -2506,30 +2502,24 @@ int ext_ut_validate_token (Json::Value &request, Json::Value &response)
   int i = 0;
   while (getline (tmp_iss, token_content[i++], ':'));
 
-  token_info = dbmt_user_search_token_info (token_content[2].c_str());
-  if (token_info == NULL)
-    {
-      return build_server_header (response, ERR_INVALID_TOKEN, "Request is rejected due to invalid token. Please reconnect.");
-    }
-
-
-  if (strcmp (token_info->token, token.c_str()))
-    {
-      return build_server_header (response, ERR_INVALID_TOKEN, "Request is rejected due to invalid token. Please reconnect.");
-    }
-
-
   if (!_validate_token_active_time (active_time))
     {
       active_time = 7200;
     }
 
-  if (now_time-token_info->login_time > active_time)
+  /* 세션 락 안에서 search + 토큰비교 + 만료검사 + login_time 갱신을 원자적으로 수행.
+   * (동시 logout 의 노드 free 와의 use-after-free 방지) */
+  dbmt_user_session_lock ();
+  token_info = dbmt_user_search_token_info (token_content[2].c_str());
+  if (token_info == NULL
+      || strcmp (token_info->token, token.c_str())
+      || now_time - token_info->login_time > active_time)
     {
+      dbmt_user_session_unlock ();
       return build_server_header (response, ERR_INVALID_TOKEN, "Request is rejected due to invalid token. Please reconnect.");
     }
-
   token_info->login_time = now_time;
+  dbmt_user_session_unlock ();
 
   request["_IP"] = token_content[0];
   request["_PORT"] = token_content[1];
