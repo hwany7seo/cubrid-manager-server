@@ -1,0 +1,7 @@
+server/win/install
+server/win/cub_manager/x64/
+server/win/cm_admin/x64/
+server/external/jsoncpp/vs/x64/
+server/output-win/
+server/win/Release/
+server/win/external/download
