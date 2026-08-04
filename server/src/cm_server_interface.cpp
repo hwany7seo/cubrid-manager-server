@@ -26,6 +26,7 @@
 #include <assert.h>
 #include <signal.h>
 #include <list>
+#include <cctype>
 
 #ifdef WINDOWS
 #include <process.h>
@@ -98,14 +99,10 @@ cub_cm_init_env ()
   char conf_name[256];
   char tmpstrbuf[DBMT_ERROR_MSG_SIZE];
   char process_name[PATH_MAX];
-  char default_cubrid_lang_type[PATH_MAX];
-  char default_cubrid_lang_msg_type[PATH_MAX];
 
   tmpstrbuf[0]= '\0';
   //  char *charset = NULL;
   snprintf (process_name, PATH_MAX, "%s", CMS_NAME);
-  snprintf (default_cubrid_lang_type, PATH_MAX, "CUBRID_LANG=en_US");
-  snprintf (default_cubrid_lang_msg_type, PATH_MAX, "CUBRID_MSG_LANG=en_US");
 
   sys_config_init ();
   uReadEnvVariables (process_name);
@@ -133,34 +130,19 @@ cub_cm_init_env ()
     }
 
   memset (&cub_httpd_env, 0, sizeof (cubrid_env_t));
-  putenv (default_cubrid_lang_type);    /* set as default language type */
-  putenv (default_cubrid_lang_msg_type);    /* set as default language type */
-  //putenv ("CUBRID_CHARSET=en_US");    /* set as default language type */
+  PUT_ENV ("CUBRID_LANG", "en_US");
 
   snprintf (cub_httpd_env.cubrid_err_log, MAX_PATH,
-            "CUBRID_ERROR_LOG=%s/cmclt.%d.err", sco.dbmt_tmp_dir, (int) getpid ());
-  putenv (cub_httpd_env.cubrid_err_log);
+            "%s/cmclt.%d.err", sco.dbmt_tmp_dir, (int) getpid ());
+  PUT_ENV ("CUBRID_ERROR_LOG", cub_httpd_env.cubrid_err_log);
 
   snprintf (cub_httpd_env.cubrid, MAX_PATH, "CUBRID=%s", sco.szCubrid);
-  putenv (cub_httpd_env.cubrid);
+  PUT_ENV ("CUBRID", sco.szCubrid);
 
   snprintf (cub_httpd_env.cubrid_databases, MAX_PATH, "CUBRID_DATABASES=%s",
             sco.szCubrid_databases);
-  putenv (cub_httpd_env.cubrid_databases);
+  PUT_ENV ("CUBRID_DATABASES", sco.szCubrid_databases);
 
-  /*  charset = getenv ("CUBRID_CHARSET");
-  if (charset != NULL)
-  {
-      snprintf (cub_httpd_env.cubrid_charset, MAX_PATH, "CUBRID_CHARSET=%s",
-                charset);
-  }
-  else
-  {
-      snprintf (cub_httpd_env.cubrid_charset, MAX_PATH,
-                "CUBRID_CHARSET=en_US");
-      putenv (cub_httpd_env.cubrid_charset);
-  }
-  */
   mutex_init (cm_mutex);
   return;
 }
@@ -286,25 +268,12 @@ ch_process_request (nvplist *req, nvplist *res)
           ut_access_log (req, NULL);
         }
 
-      /*    if (charset != NULL)
-      {
-      snprintf (charsetenv, PATH_MAX, "CUBRID_CHARSET=%s", charset);
-      putenv (charsetenv);
-      }
-      */
-      /* record the start time of running cub_manager */
       gettimeofday (&task_begin, NULL);
 
       retval = (*task_func) (req, res, _dbmt_error);
 
       /* record the end time of running cub_manager */
       gettimeofday (&task_end, NULL);
-      /*     if (charset != NULL)
-      {
-      putenv (cub_httpd_env.cubrid_charset);
-      }
-      */
-      /* caculate the running time of cub_manager. */
       _ut_timeval_diff (&task_begin, &task_end, &elapsed_msec);
 
       /* add cub_manager task running time to response. */
@@ -500,12 +469,12 @@ cm_async_request_handler (void *lpArg)
       response["note"] = e.what ();
     }
 
-  async_param->status = 1;
   nv_destroy (cli_request);
   nv_destroy (cli_response);
 
 #ifndef WINDOWS
   pthread_mutex_lock (&async_param->mutex);
+  async_param->status = 1;
   if (async_param->is_timeout)
     {
       pthread_mutex_unlock (&async_param->mutex);
@@ -518,6 +487,8 @@ cm_async_request_handler (void *lpArg)
 
   pthread_cond_broadcast (&async_param->cond);
   pthread_mutex_unlock (&async_param->mutex);
+#else
+  async_param->status = 1;
 #endif
 
   return NULL;
@@ -588,6 +559,7 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   if (err != 0)
     {
       LOG_ERROR ("cm_execute_request_async : fail to set thread mutex.");
+      delete (pstmt);
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
@@ -596,6 +568,8 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
   if (err != 0)
     {
       LOG_ERROR ("cm_execute_request_async : fail to set thread condition.");
+      pthread_mutex_destroy (&pstmt->mutex);
+      delete (pstmt);
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
@@ -620,26 +594,28 @@ cm_execute_request_async (Json::Value &request, Json::Value &response,
       return build_server_header (response, ERR_WITH_MSG,
                                   "failed to run task.");
     }
+
   pthread_mutex_lock (&pstmt->mutex);
   to.tv_sec = time (NULL) + time_out;
   to.tv_nsec = 0;
-  err = pthread_cond_timedwait (&pstmt->cond, &pstmt->mutex, &to);
 
-  if (err == ETIMEDOUT)
+  err = 0;
+  while (pstmt->status == 0 && err != ETIMEDOUT)
+    {
+      err = pthread_cond_timedwait (&pstmt->cond, &pstmt->mutex, &to);
+    }
+
+  if (pstmt->status == 0)
     {
       string dbname, task_name;
-
       task_name = request.get ("task", "unknown").asString();
       dbname = request.get ("dbname", "").asString();
-
       LOG_ERROR ("cm_execute_request_async : Timeout %ld secs: task '%s'. %s",
-		time_out, task_name.c_str(), dbname.c_str ());
-
+		 time_out, task_name.c_str(), dbname.c_str ());
       pstmt->is_timeout = 1;
       pthread_mutex_unlock (&pstmt->mutex);
       pthread_detach (async_thrd);
-
-      return ERR_WITH_MSG;
+      return build_server_header (response, ERR_WITH_MSG, "execute timeout");
     }
 
   pthread_mutex_unlock (&pstmt->mutex);
@@ -699,16 +675,14 @@ cub_cm_request_handler (Json::Value &request, Json::Value &response)
   mutex_lock (cm_mutex);
 
 
-  // leave a back door for testing...
-  if (ext_ut_validate_token (request, response) != ERR_NO_ERROR && request["token"].asString() != "test")
+  if (ext_ut_validate_token (request, response) != ERR_NO_ERROR)
     {
       response["task"] = request["task"].asString();
       mutex_unlock (cm_mutex);
       return 1;
     }
 
-  // leave a back door for testing...
-  if (!ext_ut_validate_auth (request) && request["token"].asString() != "test")
+  if (!ext_ut_validate_auth (request))
     {
       response["status"] = STATUS_FAILURE;
       response["note"] = "The user don't have authority to execute the task: " + request["task"].asString();

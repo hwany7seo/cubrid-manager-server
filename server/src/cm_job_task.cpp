@@ -134,6 +134,13 @@ using namespace std;
 #endif /* !WINDOWS */
 
 #define        ER_FEATURE_DEPRECATED   -2
+#define        ER_VIOLATE_SECURITY     -3
+
+#if defined (WINDOWS)
+#define UNLINK(file) _unlink(file)
+#else
+#define UNLINK(file) unlink(file)
+#endif
 
 extern T_EMGR_VERSION CLIENT_VERSION;
 extern T_USER_TOKEN_INFO *user_token_info;
@@ -268,7 +275,7 @@ static int op_make_triggerinput_file_alter (nvplist *req, char *input_filename);
 static int get_broker_info_from_filename (char *path, char *br_name, int *as_id);
 static char *_ts_get_error_log_param (char *dbname);
 
-static char *cm_get_abs_file_path (const char *filename, char *buf);
+static char *cm_get_abs_file_path (const char *filename, char *buf, size_t len);
 static int check_dbpath (char *dir, char *_dbmt_error);
 
 static int file_to_nvpairs (char *filepath, nvplist *res);
@@ -324,8 +331,7 @@ static int _get_folders_with_keyword (char *search_folder_path,
 static int _get_block_from_log (FILE *fp, char *block_buf, int len);
 static int
 _update_nvplist_name (nvplist *ref, const char *name, const char *value);
-static int
-_get_confpath_by_name (const char *conf_name, char *conf_path, int buflen);
+static int _get_confpath_by_name (const char *conf_name, char *conf_path, int buflen, char *_dbmt_error);
 
 static void _write_auto_update_log (char *line_buf, int is_success);
 static char *_get_format_time ();
@@ -1164,16 +1170,16 @@ ts2_get_logfile_info (nvplist *in, nvplist *out, char *_dbmt_error)
     {
       v = BROKER_LOG_DIR "/error_log";
     }
-  cm_get_abs_file_path (v, err_logdir);
+  cm_get_abs_file_path (v, err_logdir, sizeof (logdir));
 
   v = cm_br_conf_get_value (cm_conf_find_broker (&uc_conf, bname), "LOG_DIR");
   if (v == NULL)
     {
       v = BROKER_LOG_DIR "/sql_log";
     }
-  cm_get_abs_file_path (v, logdir);
+  cm_get_abs_file_path (v, logdir, sizeof (err_logdir));
 
-  cm_get_abs_file_path (BROKER_LOG_DIR, access_logdir);
+  cm_get_abs_file_path (BROKER_LOG_DIR, access_logdir, sizeof (access_logdir));
 
   cm_broker_conf_free (&uc_conf);
 
@@ -1664,9 +1670,8 @@ ts_set_sysparam (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
-  if (_get_confpath_by_name (conf_name, conf_path, sizeof (conf_path)) < 0)
+  if (_get_confpath_by_name (conf_name, conf_path, sizeof (conf_path), _dbmt_error) < 0)
     {
-      strcpy (_dbmt_error, "confname error");
       return ERR_WITH_MSG;
     }
 
@@ -1693,11 +1698,9 @@ ts_get_all_sysparam (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
-  ret = _get_confpath_by_name (conf_name, conf_path, sizeof (conf_path));
+  ret = _get_confpath_by_name (conf_name, conf_path, sizeof (conf_path), _dbmt_error);
   if (ret < 0)
     {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "(%s): %s.", conf_name,
-		ret == ER_FEATURE_DEPRECATED ? "deprecated" : "conf name error");
       return ERR_WITH_MSG;
     }
 
@@ -1729,7 +1732,7 @@ ts_get_all_sysparam (nvplist *req, nvplist *res, char *_dbmt_error)
 }
 
 static int
-_get_confpath_by_name (const char *conf_name, char *conf_path, int buflen)
+_get_confpath_by_name (const char *conf_name, char *conf_path, int buflen, char *_dbmt_error)
 {
   int retval = 0;
 
@@ -1755,11 +1758,23 @@ _get_confpath_by_name (const char *conf_name, char *conf_path, int buflen)
     }
   else if (uStringEqual (conf_name, "shard.conf"))
     {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "deprecated: %s.", conf_name);
       retval = ER_FEATURE_DEPRECATED;
+    }
+  else if (attempt_to_access_parent_dir (conf_name))
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "violation of security for conf name: %s.", conf_name);
+      retval = ER_VIOLATE_SECURITY;
     }
   else
     {
       snprintf (conf_path, buflen - 1, "%s/conf/%s", sco.szCubrid, conf_name);
+    }
+
+  if (retval == 0 && !is_authorized_filename (conf_path, _dbmt_error))
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "conf path is not authorized: %s.", conf_name);
+      retval = ER_VIOLATE_SECURITY;
     }
 
   return retval;
@@ -2504,15 +2519,32 @@ tsCreateDB (nvplist *req, nvplist *res, char *_dbmt_error)
       strcpy (_dbmt_error, "volumn path");
       return ERR_PARAM_MISSING;
     }
+  else
+    {
+      if (!is_authorized_filename (genvolpath, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
+    }
 
   if ((retval = check_dbpath (genvolpath, _dbmt_error)) != ERR_NO_ERROR)
     {
       return retval;
     }
 
-  if (logvolpath != NULL && logvolpath[0] == '\0')
+  if (logvolpath != NULL)
     {
-      logvolpath = NULL;
+      if (logvolpath[0] == '\0')
+	{
+	  logvolpath = NULL;
+	}
+      else
+	{
+	  if (!is_authorized_filename (logvolpath, _dbmt_error))
+	    {
+	      return ERR_WITH_MSG;
+	    }
+	}
     }
 
   if (logvolpath != NULL
@@ -2534,6 +2566,7 @@ tsCreateDB (nvplist *req, nvplist *res, char *_dbmt_error)
       retval = uCreateDir (genvolpath);
       if (retval != ERR_NO_ERROR)
 	{
+	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", genvolpath);
 	  return retval;
 	}
       else
@@ -2547,6 +2580,7 @@ tsCreateDB (nvplist *req, nvplist *res, char *_dbmt_error)
       retval = uCreateDir (logvolpath);
       if (retval != ERR_NO_ERROR)
 	{
+	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", logvolpath);
 	  return retval;
 	}
       else
@@ -2716,6 +2750,7 @@ tsCreateDB (nvplist *req, nvplist *res, char *_dbmt_error)
 	      retval = uCreateDir (val[2]);
 	      if (retval != ERR_NO_ERROR)
 		{
+		  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", val[2]);
 		  fclose (outfile);
 		  return retval;
 		}
@@ -3113,6 +3148,12 @@ tsRenameDB (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", "forcedel");
       return ERR_PARAM_MISSING;
+    }
+
+  if (exvolpath != NULL && strcmp (exvolpath, "none") != 0 &&
+      !is_authorized_filename (exvolpath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   db_mode = uDatabaseMode (dbname, NULL);
@@ -3515,11 +3556,16 @@ tsRunAddvoldb (nvplist *req, nvplist *res, char *_dbmt_error)
       volpath = db_dir;
     }
 
+  if (!is_authorized_filename (volpath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   if (access (volpath, F_OK) < 0)
     {
       if (uCreateDir (volpath) != ERR_NO_ERROR)
 	{
-	  sprintf (_dbmt_error, "%s", volpath);
+	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", volpath);
 	  return ERR_DIR_CREATE_FAIL;
 	}
     }
@@ -3665,6 +3711,13 @@ ts_copydb (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       strcpy (_dbmt_error, "extended volume path");
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (logpath, _dbmt_error) ||
+      (destdbpath != NULL && !is_authorized_filename (destdbpath, _dbmt_error)) ||
+      (exvolpath != NULL && !is_authorized_filename (exvolpath, _dbmt_error)))
+    {
+      return ERR_WITH_MSG;
     }
 
   db_mode = uDatabaseMode (srcdbname, NULL);
@@ -4040,7 +4093,7 @@ ts_paramdump (nvplist *req, nvplist *res, char *_dbmt_error)
       argv[argc++] = "--" PARAMDUMP_BOTH_L;
     }
 
-  if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor >= 1105))
+  if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor) >= 1105)
     {
       argv[argc++] = "--" PLANDUMP_FOR_CM;
     }
@@ -4487,11 +4540,10 @@ ts_backupdb (nvplist *req, nvplist *res, char *_dbmt_error)
   char *dbname, *level, *removelog, *volname, *backupdir, *check;
   char dbname_at_hostname[MAXHOSTNAMELEN + DB_NAME_LEN];
   int ha_mode = 0;
-  char *mt, *zip, *safe_replication;
+  char *mt, *zip;
   char backupfilepath[PATH_MAX];
   char inputfilepath[PATH_MAX];
   char cmd_name[CUBRID_CMD_NAME_LEN];
-  char sp_option[256];
   const char *argv[16];
   int argc = 0;
   FILE *inputfile;
@@ -4519,15 +4571,27 @@ ts_backupdb (nvplist *req, nvplist *res, char *_dbmt_error)
   check = nv_get_val (req, "check");
   mt = nv_get_val (req, "mt");
   zip = nv_get_val (req, "zip");
-  safe_replication = nv_get_val (req, "safereplication");
 
-  if (backupdir == NULL)
+  if (backupdir == NULL || strlen (backupdir) == 0)
     {
       strcpy (_dbmt_error, "backupdir");
       return ERR_PARAM_MISSING;
     }
 
-  snprintf (backupfilepath, PATH_MAX - 1, "%s/%s", backupdir, volname);
+  if (volname != NULL)
+    {
+      snprintf (backupfilepath, PATH_MAX - 1, "%s/%s", backupdir, volname);
+    }
+  else
+    {
+      snprintf (backupfilepath, PATH_MAX - 1, "%s", backupdir);
+    }
+
+  if (is_invalid_filename_with_msg (backupfilepath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
 
   /* create directory */
   if (access (backupfilepath, F_OK) < 0)
@@ -4570,13 +4634,6 @@ ts_backupdb (nvplist *req, nvplist *res, char *_dbmt_error)
   if (zip != NULL && uStringEqual (zip, "y"))
     {
       argv[argc++] = "--" BACKUP_COMPRESS_L;
-    }
-
-  if (safe_replication != NULL && uStringEqual (safe_replication, "y"))
-    {
-      snprintf (sp_option, sizeof (sp_option) - 1,
-		"--safe-page-id `repl_safe_page %s`", dbname);
-      argv[argc++] = sp_option;
     }
 
   if (ha_mode != 0)
@@ -4716,6 +4773,11 @@ ts_unloaddb (nvplist *req, nvplist *res, char *_dbmt_error)
       snprintf (fullpath, sizeof (fullpath) - 1, "%s", targetdir);
     }
 
+  if (!is_authorized_filename (fullpath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   if (access (fullpath, F_OK) < 0)
     {
       if (uCreateDir (fullpath) != ERR_NO_ERROR)
@@ -4786,8 +4848,14 @@ ts_unloaddb (nvplist *req, nvplist *res, char *_dbmt_error)
     }
   argv[argc++] = "--" UNLOAD_OUTPUT_PATH_L;
   argv[argc++] = fullpath;
+
   if ((usehash != NULL) && (strcmp (usehash, "yes") == 0))
     {
+      if (strcmp (hashdir, "none") != 0 && !is_authorized_filename (hashdir, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
+
       argv[argc++] = "--" UNLOAD_HASH_FILE_L;
       argv[argc++] = hashdir;
     }
@@ -5309,6 +5377,11 @@ ts_loaddb (nvplist *req, nvplist *res, char *_dbmt_error)
     }
   if (schema_file_list != NULL && !uStringEqual (schema_file_list, "none"))
     {
+      if (!is_authorized_filename (schema_file_list, _dbmt_error) ||
+	  is_invalid_schema_file_lists (schema_file_list, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
       snprintf (schema_file_list_opt, PATH_MAX, "%s%s", "--" LOAD_SCHEMA_FILE_LIST_L "=", schema_file_list);
       argv[argc++] = schema_file_list_opt;
     }
@@ -5471,6 +5544,10 @@ ts_restoredb (nvplist *req, nvplist *res, char *_dbmt_error)
   argv[argc++] = lv;
   if (pathname != NULL && !uStringEqual (pathname, "none"))
     {
+      if (!is_authorized_filename (pathname, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
       argv[argc++] = "--" RESTORE_BACKUP_FILE_PATH_L;
       argv[argc++] = pathname;
     }
@@ -5482,6 +5559,11 @@ ts_restoredb (nvplist *req, nvplist *res, char *_dbmt_error)
   if (recovery_path != NULL && !uStringEqual (recovery_path, "")
       && !uStringEqual (recovery_path, "none"))
     {
+      if (!is_authorized_filename (recovery_path, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
+
       /* use -u option to specify restore database path */
       argv[argc++] = "--" RESTORE_USE_DATABASE_LOCATION_PATH_L;
 
@@ -5495,6 +5577,7 @@ ts_restoredb (nvplist *req, nvplist *res, char *_dbmt_error)
 	  retval = uCreateDir (recovery_path);
 	  if (retval != ERR_NO_ERROR)
 	    {
+	      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", recovery_path);
 	      return retval;
 	    }
 	}
@@ -5577,6 +5660,10 @@ ts_backup_vol_info (nvplist *req, nvplist *res, char *_dbmt_error)
     }
   if (pathname != NULL && !uStringEqual (pathname, "none"))
     {
+      if (!is_authorized_filename (pathname, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
       argv[argc++] = "--" RESTORE_BACKUP_FILE_PATH_L;
       argv[argc++] = pathname;
     }
@@ -6402,6 +6489,14 @@ ts_set_backup_info (nvplist *req, nvplist *res, char *_dbmt_error)
 		    autobackup_conf_entry[i]);
 	  return ERR_PARAM_MISSING;
 	}
+
+      if (strcmp (autobackup_conf_entry[i], "path") == 0)
+	{
+	  if (!is_authorized_filename (conf_item[i], _dbmt_error))
+	    {
+	      return ERR_WITH_MSG;
+	    }
+	}
     }
 
   conf_item[AUTOBACKUP_CONF_ENTRY_NUM - 1] =
@@ -6523,6 +6618,14 @@ ts_add_backup_info (nvplist *req, nvplist *res, char *_dbmt_error)
 	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s",
 		    autobackup_conf_entry[i]);
 	  return ERR_PARAM_MISSING;
+	}
+
+      if (strcmp (autobackup_conf_entry[i], "path") == 0)
+	{
+	  if (!is_authorized_filename (conf_item[i], _dbmt_error))
+	    {
+	      return ERR_WITH_MSG;
+	    }
 	}
     }
 
@@ -6777,6 +6880,11 @@ ts_view_log (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
+  if (!is_authorized_filename (filepath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   startline = nv_get_val (req, "start");
   endline = nv_get_val (req, "end");
 
@@ -6830,6 +6938,11 @@ ts_reset_log (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       strcpy (_dbmt_error, "filepath");
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (path, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   outfile = fopen (path, "w");
@@ -8158,6 +8271,14 @@ ts_check_dir (nvplist *req, nvplist *res, char *_dbmt_error)
       nv_lookup (req, i, &n, &v);
       if ((n != NULL) && (strcmp (n, "dir") == 0))
 	{
+	  if (v != NULL)
+	    {
+	      if (!is_authorized_filename (v, _dbmt_error))
+		{
+		  return ERR_WITH_MSG;
+		}
+	    }
+
 	  if ((v == NULL) || (access (v, F_OK) < 0))
 	    {
 	      nv_add_nvp (res, "noexist", v);
@@ -8178,6 +8299,14 @@ ts_check_file (nvplist *req, nvplist *res, char *_dbmt_error)
       nv_lookup (req, i, &n, &v);
       if ((n != NULL) && (strcmp (n, "file") == 0))
 	{
+	  if (v != NULL)
+	    {
+	      if (!is_authorized_filename (v, _dbmt_error))
+		{
+		  return ERR_WITH_MSG;
+		}
+	    }
+
 	  if ((v != NULL) && (access (v, F_OK) == 0))
 	    {
 	      nv_add_nvp (res, "existfile", v);
@@ -9317,6 +9446,10 @@ ts_analyzecaslog (nvplist *cli_request, nvplist *cli_response,
       nv_lookup (cli_request, sect + i, NULL, &logfile);
       if (logfile)
 	{
+	  if (!is_authorized_filename (logfile, diag_error))
+	    {
+	      return ERR_WITH_MSG;
+	    }
 	  argv[arg_index++] = logfile;
 	}
     }
@@ -9654,6 +9787,10 @@ ts_executecasrunner (nvplist *cli_request, nvplist *cli_response,
   if ((casrunnerwithFile != NULL) && (strcmp (casrunnerwithFile, "yes") == 0)
       && (logfilename != NULL))
     {
+      if (logfilename != NULL && !is_authorized_filename (logfilename, diag_error))
+	{
+	  return ERR_WITH_MSG;
+	}
       snprintf (tmplogfilename, PATH_MAX - 1, "%s", logfilename);
     }
   else
@@ -9732,9 +9869,8 @@ ts_executecasrunner (nvplist *cli_request, nvplist *cli_response,
   argv[++i] = log_converter_res;
   argv[++i] = NULL;
 
-  snprintf (out_msg_file_env, sizeof (out_msg_file_env) - 1,
-	    "CUBRID_MANAGER_OUT_MSG_FILE=%s", resfile2);
-  putenv (out_msg_file_env);
+  snprintf (out_msg_file_env, sizeof (out_msg_file_env) - 1, "%s", resfile2);
+  PUT_ENV ("CUBRID_MANAGER_OUT_MSG_FILE", out_msg_file_env);
 
   if (run_child (argv, 1, NULL, NULL, NULL, NULL) < 0)
     {
@@ -9835,6 +9971,7 @@ ts_removecasrunnertmpfile (nvplist *cli_request, nvplist *cli_response,
   char filename[PATH_MAX];
   char cubrid_tmp_path[PATH_MAX];
   char *fullpath_with_filename = NULL;
+  int ret = 0;
 
   const char *casrunnertmp_short[] =
   { "log_converted", "cas_log_tmp", "log_run" };
@@ -9854,18 +9991,10 @@ ts_removecasrunnertmpfile (nvplist *cli_request, nvplist *cli_response,
       return ERR_PARAM_MISSING;
     }
 
-  /* check permission : must under $CUBRID/tmp/ */
-#if defined(WINDOWS)
-  snprintf (cubrid_tmp_path, PATH_MAX, "%s\\", sco.dbmt_tmp_dir);
-#else
-  snprintf (cubrid_tmp_path, PATH_MAX, "%s/", sco.dbmt_tmp_dir);
-#endif
-
-  if (strstr (fullpath_with_filename, cubrid_tmp_path) == NULL)
+  if (is_invalid_filename (fullpath_with_filename) || !is_subpath (sco.dbmt_tmp_dir, fullpath_with_filename))
     {
-      snprintf (diag_error, DBMT_ERROR_MSG_SIZE, "%s",
-		fullpath_with_filename);
-      return ERR_PERMISSION;
+      snprintf (diag_error, DBMT_ERROR_MSG_SIZE, "invalid filename or path not allowed: %s", fullpath_with_filename);
+      return ERR_WITH_MSG;
     }
 
   if (ut_get_filename (fullpath_with_filename, 1, filename) != 0)
@@ -9891,15 +10020,9 @@ ts_removecasrunnertmpfile (nvplist *cli_request, nvplist *cli_response,
       return ERR_PERMISSION;
     }
 
-#if defined(WINDOWS)
-  snprintf (command, sizeof (command), "%s %s %s", DEL_FILE,
-	    DEL_FILE_OPT, fullpath_with_filename);
-#else
-  snprintf (command, sizeof (command), "%s %s %s", DEL_DIR, DEL_DIR_OPT,
-	    fullpath_with_filename);
-#endif
+  ret = UNLINK (fullpath_with_filename);
 
-  if (system (command) == -1)
+  if (ret != 0)
     {
       snprintf (diag_error, DBMT_ERROR_MSG_SIZE, "%s",
 		fullpath_with_filename);
@@ -9922,6 +10045,11 @@ ts_getcaslogtopresult (nvplist *cli_request, nvplist *cli_response,
     {
       snprintf (diag_error, DBMT_ERROR_MSG_SIZE, "%s", "filename");
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (filename, diag_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   qindex = nv_get_val (cli_request, "qindex");
@@ -10166,6 +10294,11 @@ ts_remove_log (nvplist *req, nvplist *res, char *_dbmt_error)
 #if defined(WINDOWS)
       path = nt_style_path (path, full_path_buf);
 #endif
+      if (!is_authorized_filename (path, _dbmt_error))
+	{
+	  return ERR_WITH_MSG;
+	}
+
       if (access (path, F_OK) != 0)
 	{
 	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "No such file: %s",
@@ -10173,32 +10306,11 @@ ts_remove_log (nvplist *req, nvplist *res, char *_dbmt_error)
 	  return ERR_WITH_MSG;
 	}
 
-      snprintf (command, sizeof (command), "%s %s %s", DEL_FILE,
-		DEL_FILE_OPT, path);
-
-      output = popen (command, "r");
-      memset (buf, '\0', sizeof (buf));
-      if (output != NULL)
+      if (UNLINK (path) != 0)
 	{
-	  if (fgets (buf, PATH_MAX, output) != NULL)
-	    {
-#if defined(WINDOWS)
-	      pclose (output);
-	      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "Cannot remove %s",
-			full_path_buf);
-	      return ERR_WITH_MSG;
-#endif
-	      if (get_broker_info_from_filename (path, broker_name, &as_id) < 0
-		  || cm_del_cas_log (broker_name, as_id, &error) < 0)
-		{
-		  pclose (output);
-		  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s",
-			    error.err_msg);
-		  return ERR_WITH_MSG;
-		}
-	    }
+	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "Cannot remove: %s", full_path_buf);
+	  return ERR_WITH_MSG;
 	}
-      pclose (output);
     }                /* end of for */
 
   return ERR_NO_ERROR;
@@ -11183,6 +11295,11 @@ ts_copy_folder (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
+  if (!is_authorized_filename (src_dir, _dbmt_error) || !is_authorized_filename (dest_dir, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   if (folder_copy (src_dir, dest_dir) < 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE - 1,
@@ -11203,6 +11320,11 @@ ts_delete_folder (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", "srcdir");
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (src_dir, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   force_flag = REMOVE_DIR_FORCED;
@@ -11227,6 +11349,11 @@ ts_write_and_save_conf (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       strcpy_limit (_dbmt_error, "confpath", DBMT_ERROR_MSG_SIZE);
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (conf_path, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   /* if conf_path exsit, backup it at the current path. */
@@ -11272,6 +11399,11 @@ ts_run_sql_statement (nvplist *req, nvplist *res, char *_dbmt_error)
     }
 
   infile = nv_get_val (req, "infile");
+  if (infile != NULL && !is_authorized_filename (infile, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   command = nv_get_val (req, "command");
 
   uid = nv_get_val (req, "uid");
@@ -11313,6 +11445,11 @@ ts_get_folders_with_keyword (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
+  if (!is_authorized_filename (search_folder, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   if ((keyword = nv_get_val (req, "keyword")) == NULL)
     {
       strcpy_limit (_dbmt_error, "keyword", DBMT_ERROR_MSG_SIZE);
@@ -11346,7 +11483,34 @@ ts_run_script (nvplist *req, nvplist *res, char *_dbmt_error)
       nv_lookup (req, i, &n, &v);
       if ((n != NULL) && (strcmp (n, "envvar") == 0))
 	{
-	  putenv (v);
+	  bool invalid_env = true;
+
+	  if (v != NULL && strlen (v) != 0)
+	    {
+	      std::string entry = v;
+	      std::string env_name = extract_env_name (entry);
+
+	      if (is_allowed_script_env (env_name))
+		{
+		  invalid_env = false;
+		}
+	    }
+
+	  if (invalid_env)
+	    {
+	      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "setting this environment variable is not permitted: %s",
+			v ? v : "(NULL)");
+	      return ERR_WITH_MSG;
+	    }
+
+	  if (v)
+	    {
+	      if (!setenv_using_putenv_fmt (v))
+		{
+		  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "set environment failed: %s", v);
+		  return ERR_WITH_MSG;
+		}
+	    }
 	}
     }
 
@@ -11354,6 +11518,11 @@ ts_run_script (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       strcpy_limit (_dbmt_error, "script_path", DBMT_ERROR_MSG_SIZE);
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (script_path, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   argv[argc++] = script_path;
@@ -11386,6 +11555,11 @@ ts_get_file_total_line_num (nvplist *req, nvplist *res, char *_dbmt_error)
       return ERR_PARAM_MISSING;
     }
 
+  if (!is_authorized_filename (filepath, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
+
   if ((fp = fopen (filepath, "r")) == NULL)
     {
       return ERR_TMPFILE_OPEN_FAIL;
@@ -11415,6 +11589,11 @@ ts_error_trace (nvplist *req, nvplist *res, char *_dbmt_error)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", "logpath");
       return ERR_PARAM_MISSING;
+    }
+
+  if (!is_authorized_filename (err_log_path, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
     }
 
   if ((eid = nv_get_val (req, "eid")) == NULL)
@@ -11498,6 +11677,7 @@ ts_remove_files (nvplist *req, nvplist *res, char *_dbmt_error)
 		       "Please inform file names to be deleted.");
 	      return ERR_WITH_MSG;
 	    }
+
 	  path_len = (int) strlen (path);
 	  if (path_len <= 2 || strstr (path, "..") || strstr (path, "/")
 	      || strstr (path, "\\"))
@@ -11510,6 +11690,11 @@ ts_remove_files (nvplist *req, nvplist *res, char *_dbmt_error)
 	    {
 	      snprintf (fullpath, sizeof (fullpath) - 1, "%s/tmp/%s",
 			sco.szCubrid, (path + 2));
+
+	      if (!is_authorized_filename (fullpath, _dbmt_error))
+		{
+		  return ERR_WITH_MSG;
+		}
 	    }
 	  else
 	    {
@@ -12974,7 +13159,7 @@ _ts_lockdb_parse_us (nvplist *res, FILE *infile)
 	      nv_add_nvp (res, "numlocked", s1);
 
 	      fgets (buf, sizeof (buf), infile);
-	      if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor < 1104))
+	      if (CUBRID_VERS (cubrid_version_major,cubrid_version_minor) < 1104)
 		{
 		  scan_matched =
 		      sscanf (buf, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %255s", s2);
@@ -13613,9 +13798,9 @@ get_dbvoldir (char *vol_dir, size_t vol_dir_size, char *dbname, char *err_buf)
 }
 
 static char *
-cm_get_abs_file_path (const char *filename, char *buf)
+cm_get_abs_file_path (const char *filename, char *buf, size_t len)
 {
-  strcpy (buf, filename);
+  snprintf (buf, len, "%s", filename);
 
   if (buf[0] == '/')
     {
@@ -13627,7 +13812,7 @@ cm_get_abs_file_path (const char *filename, char *buf)
       return buf;
     }
 #endif
-  sprintf (buf, "%s/%s", getenv ("CUBRID"), filename);
+  snprintf (buf, len, "%s/%s", getenv ("CUBRID"), filename);
   return buf;
 }
 
@@ -15501,58 +15686,8 @@ ts_auto_update (nvplist *req, nvplist *res, char *_dbmt_error)
   pid_t pid = 0;
 #endif
 
-  patch_name = nv_get_val (req, "patch_name");
-  if (patch_name == NULL)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", "patch_name");
-      return ERR_PARAM_MISSING;
-    }
-#ifdef WINDOWS
-  sprintf (path, "%s\\", sco.dbmt_tmp_dir);
-#else
-  sprintf (path, "%s/", sco.dbmt_tmp_dir);
-#endif
-
-  if ((ret_val =
-	       generate_update_script (patch_name, sco.szAutoUpdateURL, path,
-				       _dbmt_error)) != ERR_NO_ERROR)
-    {
-      return ret_val;
-    }
-
-  sprintf (shell_name, "%s" SHELL_NAME, path);
-
-  argv[0] = shell_name;
-  argv[1] = NULL;
-
-  sprintf (err_log, "%scms.autoupdate.err", path);
-  sprintf (output_log, "%scms.autoupdate.log", path);
-
-#ifdef WINDOWS
-  ret_val = run_child (argv, 0, NULL, output_log, err_log, NULL);
-
-#else
-  sprintf (cmd, "%s >%s 2>%s", shell_name, output_log, err_log);
-
-  // As "system" fucntion will wait for the command return in parent process, fork a new procee to execute it in order to avoid blocking.
-  if ((pid = fork ()) > 0)
-    {
-      return ERR_NO_ERROR;
-    }
-  else if (pid == 0)
-    {
-      system (cmd);
-      exit (0);
-    }
-  else
-    {
-      sprintf (_dbmt_error, "fork()");
-      return ERR_SYSTEM_CALL;
-    }
-
-#endif
-
-  return ERR_NO_ERROR;
+  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "We do not support autoupdate anymore");
+  return ERR_WITH_MSG;
 }
 
 int
@@ -15601,6 +15736,11 @@ ts_list_dir (nvplist *req, nvplist *res, char *_dbmt_error)
 #else
   sprintf (full_path, "%s/%s/", CUBRID, path);
 #endif
+
+  if (!is_authorized_filename (full_path, _dbmt_error))
+    {
+      return ERR_WITH_MSG;
+    }
 
 #if defined(WINDOWS)
   {
@@ -15783,37 +15923,55 @@ ts_monitor_process (nvplist *req, nvplist *res, char *_dbmt_error)
     }
 
 #else
-  char pid_file[PATH_MAX];
-  char cmd_name[PATH_MAX];
+  uid_t my_uid = geteuid ();
 
-  FILE *fin;
-  int ch;
+  DIR *proc_dir;
+  struct dirent *entry;
 
-  make_temp_filepath (pid_file, sco.dbmt_tmp_dir, "monitor_process_tmp", TS_MONITOR_PROCESS, PATH_MAX);
-  fin = fopen (pid_file, "w+");
-
-  i = 0;
   while (process_name[i][0] != 0)
     {
-      sprintf (cmd_name, "pgrep -u $(whoami) %s > %s", process_name[i],
-	       pid_file);
-      system (cmd_name);
+      std::string proc = process_name[i];
 
-      if ((ch = fgetc (fin)) == EOF)
+      snprintf (exist, sizeof (exist), "don't exist");
+      if ((proc_dir = opendir ("/proc")) == nullptr)
 	{
-	  strcpy (exist, "don't exist");
-	}
-      else if (ch > '1' && ch < '9')
-	{
-	  strcpy (exist, "exist");
+	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "cannot open /proc");
+	  return ERR_WITH_MSG;
 	}
 
+      while ((entry = readdir (proc_dir)) != nullptr)
+	{
+	  std::string name (entry->d_name);
+
+	  if (!is_pid_dir (name))
+	    {
+	      continue;
+	    }
+
+	  uid_t proc_uid;
+
+	  if (!get_proc_uid (name, proc_uid) || proc_uid != my_uid)
+	    {
+	      continue;
+	    }
+
+	  std::string comm;
+
+	  if (!get_proc_comm (name, comm))
+	    {
+	      continue;
+	    }
+
+	  if (comm == proc)
+	    {
+	      snprintf (exist, sizeof (exist), "exist");
+	    }
+	}
+
+      closedir (proc_dir);
       nv_add_nvp (res, process_name[i], exist);
       i++;
     }
-
-  fclose (fin);
-  unlink (pid_file);
 #endif
 
   return ERR_NO_ERROR;
