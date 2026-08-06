@@ -186,6 +186,8 @@ int read_from_socket (SOCKET fd, char *buf, int size);
 int write_to_socket (SOCKET fd, const char *buf, int size);
 int is_cmserver_process (int pid, const char *module_name);
 int make_default_env (void);
+int is_positive_number (const char *str);
+
 #if defined(WINDOWS)
 void remove_end_of_dir_ch (char *path);
 #endif
@@ -224,9 +226,6 @@ int ut_get_host_stat (T_CMS_HOST_STAT *stat, char *_dbmt_error);
 int ut_get_proc_stat (T_CMS_PROC_STAT *stat, int pid);
 int ut_record_cubrid_utility_log_stderr (const char *msg);
 int ut_record_cubrid_utility_log_stdout (const char *msg);
-int run_child_linux (const char *pname, const char *const argv[], int wait_flag,
-                     const char *stdin_file, char *stdout_file, char *stderr_file,
-                     int *exit_status);
 void write_manager_access_log (const char *protocol_str, const char *msg);
 void write_manager_error_log (const char *protocol_str, const char *msg);
 bool is_valid_filename (const char *filename);

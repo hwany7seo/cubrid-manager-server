@@ -89,6 +89,9 @@ static T_EXTEND_TASK_INFO ext_task_info[] =
   {NULL, 0, NULL, 0}
 };
 
+static int count_and_get_last_word (string str, char *word);
+static int is_invalid_time (char *str);
+
 static bool
 ext_get_id_from_token (const char *token, char token_content[][TOKEN_LENGTH+1])
 {
@@ -1283,6 +1286,7 @@ int ext_set_autoexec_query (Json::Value &request, Json::Value &response)
   string conf_item[AUTOEXECQUERY_CONF_ENTRY_NUM];
   fstream conf_file;
   ofstream tmp_file;
+  char detail2[TOKEN_LENGTH];
 
 
   autoexecquery_conf_file[0] = '\0';
@@ -1420,6 +1424,37 @@ int ext_set_autoexec_query (Json::Value &request, Json::Value &response)
 
       // details of period
       conf_item[6] = queryplan[index]["detail"].asString();
+
+      if (count_and_get_last_word (conf_item[6], detail2) != 2)
+	{
+          char tmp[DBMT_ERROR_MSG_SIZE];
+          snprintf (tmp, DBMT_ERROR_MSG_SIZE-1, "Invalid time format in detail: %s", conf_item[6].c_str());
+          tmp_file.close();
+          return build_server_header (response, ERR_WITH_MSG, tmp);
+	}
+
+      if (detail2[0] == 'i')
+	{
+          char tmp[DBMT_ERROR_MSG_SIZE];
+
+	  if (!is_positive_number (&detail2[1]))
+	    {
+	      snprintf (tmp, DBMT_ERROR_MSG_SIZE-1, "Invalid interval: %s", detail2);
+	      tmp_file.close();
+	      return build_server_header (response, ERR_WITH_MSG, tmp);
+	    }
+	}
+      else
+	{
+          char tmp[DBMT_ERROR_MSG_SIZE];
+
+	  if (is_invalid_time (detail2))
+	    {
+	      snprintf (tmp, DBMT_ERROR_MSG_SIZE-1, "Invalid time spec: %s", detail2);
+	      tmp_file.close();
+	      return build_server_header (response, ERR_WITH_MSG, tmp);
+	    }
+	}
 
       // get sql script, checking its length
       sql_script = queryplan[index]["query_string"].asString();
@@ -1578,6 +1613,8 @@ int ext_get_ha_apply_info (Json::Value &request, Json::Value &response)
 
   if ((retval=_read_apply_info_cmd_output (stdout_log_file, stderr_log_file, str_result)) != ERR_NO_ERROR)
     {
+      unlink (stdout_log_file);
+      unlink (stderr_log_file);
       return build_server_header (response, retval, "Invalid options or command format!");
     }
 
@@ -1596,6 +1633,9 @@ int ext_get_ha_apply_info (Json::Value &request, Json::Value &response)
 
   response["copied_active_eof_lsa"] = copied_active_eof_lsa;
   response["active_eof_lsa"] = active_eof_lsa;
+
+  unlink (stdout_log_file);
+  unlink (stderr_log_file);
 
   return build_server_header (response, ERR_NO_ERROR, STATUS_NONE);
 }
@@ -2726,4 +2766,47 @@ int ext_get_mon_statistic (Json::Value &request, Json::Value &response)
     {
       return build_server_header (response, ERR_WITH_MSG, errmsg.c_str());
     }
+}
+
+static int count_and_get_last_word (string str, char *word)
+{
+  stringstream ss(str);
+  string token;
+  int count = 0;
+
+  while (ss >> token)
+    {
+      count++;
+    }
+
+  if (token.length () >= TOKEN_LENGTH)
+    {
+      word[0] = '\0';
+      return -1;
+    }
+
+  snprintf (word, TOKEN_LENGTH, "%s", token.c_str ());
+
+  return count;
+}
+
+static int is_invalid_time (char *str)
+{
+  int hour, minute;
+  char colon;
+  string timestr = str;
+
+  stringstream ss(timestr);
+
+  if (!(ss >> hour >> colon >> minute))
+    {
+      return 1;
+    }
+
+  if (!ss.eof() || colon != ':' || hour < 0 || hour > 23 || minute < 0 || minute > 59)
+    {
+        return 1;
+    }
+
+  return 0;
 }

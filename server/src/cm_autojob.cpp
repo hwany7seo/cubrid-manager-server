@@ -49,6 +49,7 @@
 #include "cm_cmd_exec.h"
 #include "cm_text_encryption.h"
 #include "cm_stat.h"
+#include "cm_log.h"
 
 #ifdef _DEBUG_
 #include "deb.h"
@@ -57,8 +58,11 @@
 
 #define MIN_AUTOBACKUPDB_DELAY         600
 #define MAX_AUTOADD_FREE_SPACE_RATE    0.5
+#define MAX_LOG_LINE                   10
 
-
+/*
+ * To prevent repetitive logging
+ */
 typedef struct backup_period_details_t
 {
   int date;
@@ -134,6 +138,8 @@ typedef struct autoexecquery_t
   char detail2[16];
   char query_string[MAX_AUTOQUERY_SCRIPT_SIZE];
   int db_mode;
+  int line_num;
+  int log_cnt;
   struct autoexecquery_t *next;
 } autoexecquery_node;
 
@@ -164,7 +170,7 @@ typedef enum
 static void aj_load_execquery_conf (ajob *p_aj);
 static void aj_execquery_handler (void *hd, time_t prev_check_time,
                                   time_t cur_time);
-static void aj_execquery_get_exec_time (autoexecquery_node *c,
+static int aj_execquery_get_exec_time (autoexecquery_node *c,
                                         query_period_details *d,
                                         struct tm *exec_tm,
                                         time_t prev_check_time);
@@ -971,6 +977,7 @@ aj_load_execquery_conf (ajob *p_aj)
   char *conf_item[AUTOEXECQUERY_CONF_ENTRY_NUM];
   char buf[MAX_JOB_CONFIG_FILE_LINE_LENGTH];
   autoexecquery_node *c;
+  int line_num = 0;
 
   p_aj->is_on = 0;
 
@@ -1003,6 +1010,7 @@ aj_load_execquery_conf (ajob *p_aj)
 
   while (fgets (buf, sizeof (buf), infile))
     {
+      line_num++;
       ut_trim (buf);
       if (buf[0] == '#' || buf[0] == '\0')
         {
@@ -1064,6 +1072,8 @@ aj_load_execquery_conf (ajob *p_aj)
       snprintf (c->query_string, sizeof (c->query_string) - 1, "%s",
                 conf_item[8]);
       c->db_mode = 2;
+      c->line_num = line_num;
+      c->log_cnt = 0;
       c->next = NULL;
     }                /* end of while */
   fclose (infile);
@@ -1094,7 +1104,11 @@ aj_execquery_handler (void *hd, time_t prev_check_time, time_t cur_time)
 
       while (detail1 != NULL)
         {
-          aj_execquery_get_exec_time (c, detail1, &exec_tm, prev_check_time);
+          if (aj_execquery_get_exec_time (c, detail1, &exec_tm, prev_check_time) == 0)
+	    {
+              detail1 = detail1->next;
+              continue;
+	    }
 
           // backup tm_wday, since mktime can change tm_wday field.
           tm_wday = exec_tm.tm_wday;
@@ -1121,11 +1135,13 @@ aj_execquery_handler (void *hd, time_t prev_check_time, time_t cur_time)
   return;
 }
 
-static void
+static int
 aj_execquery_get_exec_time (autoexecquery_node *c,
                             query_period_details *d,
                             struct tm *exec_tm, time_t prev_check_time)
 {
+  int ret = -1;
+
   switch (c->period)
     {
     case AEQT_ONE:
@@ -1177,18 +1193,26 @@ aj_execquery_get_exec_time (autoexecquery_node *c,
 
   if ('i' == c->detail2[0])    // time interval for auto execute query
     {
-      int interval;
+      int interval = is_positive_number (&c->detail2[1]);
       time_t prev_day_sec = 0;
       struct tm prev_tm, *tm_p;
 
       tm_p = localtime (&prev_check_time);
       if (tm_p == NULL)
         {
-          return;
+          return 0;
         }
       prev_tm = *tm_p;
 
-      sscanf (c->detail2, "i%d", &interval);
+      if (interval == 0)
+	{
+	  if (c->log_cnt++ < MAX_LOG_LINE)
+	    {
+	      LOG_ERROR ("invalid interval (aj_execquery_get_exec_time DB = %s): QID (%s) #%d, detail2 = %s",
+			 c->dbname, c->query_id, c->line_num, c->detail2);
+	    }
+	  return 0;
+	}
 
       prev_day_sec =
         prev_tm.tm_hour * 3600 + prev_tm.tm_min * 60 + prev_tm.tm_sec;
@@ -1207,9 +1231,24 @@ aj_execquery_get_exec_time (autoexecquery_node *c,
     }
   else                // specific time for auto execute query
     {
-      sscanf (c->detail2, "%d:%d", & (exec_tm->tm_hour), & (exec_tm->tm_min));
+      int matched_len = 0;
+      exec_tm->tm_hour = exec_tm->tm_min = -1;
+      ret = sscanf (c->detail2, "%d:%d%n", & (exec_tm->tm_hour), & (exec_tm->tm_min), &matched_len);
+      if (ret != 2 || c->detail2[matched_len] != '\0'
+	  || exec_tm->tm_hour < 0 || exec_tm->tm_hour > 23
+	  || exec_tm->tm_min < 0 || exec_tm->tm_min > 59)
+	{
+	  if (c->log_cnt++ < MAX_LOG_LINE)
+	    {
+	      LOG_ERROR ("invalid time spec (aj_execquery_get_exec_time DB = %s): QID (%s) #%d, detail2 = %s",
+			 c->dbname, c->query_id, c->line_num, c->detail2);
+	    }
+	  return 0;
+	}
     }
   exec_tm->tm_sec = 0;
+
+  return 1;
 }
 
 static void

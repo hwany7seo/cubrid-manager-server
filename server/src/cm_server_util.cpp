@@ -3748,6 +3748,27 @@ ut_record_cubrid_utility_log_stdout (const char *msg)
   return 0;
 }
 
+int
+is_positive_number (const char *str)
+{
+  char *endptr;
+  long num;
+
+  if (str == NULL)
+    {
+      return 0;
+    }
+
+  errno = 0;
+  num = strtol (str, &endptr, 10);
+  if (errno == ERANGE || (endptr != NULL && strlen (endptr) > 0) || num <= 0 || num > INT_MAX)
+    {
+      return 0;
+    }
+
+  return (int) num;
+}
+
 #if defined (WINDOWS)
 static bool
 delete_directory (const std::string& rawPath)
