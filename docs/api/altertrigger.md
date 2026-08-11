@@ -8,6 +8,10 @@ Alter a trigger.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| dbname | database name |
+| triggername | the name of the trigger to be altered |
+| status | ACTIVE or INACTIVE |
+| priority | the priority of the trigger |
 
 ## Request Sample
 

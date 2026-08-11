@@ -8,6 +8,20 @@ Add a backup schedule.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| dbname | database name |
+| backupid | auto-backup plan id |
+| path | the directory the backup volume is created in |
+| period_type | the cycle of auto-backup, such as weekly, monthly, everyday and special. |
+| period_date | backup date. |
+| time | auto-backup time (or interval, start with "i", the measurement is minutes) |
+| level | auto-backup level |
+| archivedel | on-off indicating whether to delete archive file |
+| storeold | on-off indicating whether to delete old files |
+| onoff | on-off indicating whether the auto-backup plan is enabled |
+| zip | on-off indicating whether to zip in auto-backup |
+| updatestatus | on-off indicating whether to update statistic infromation |
+| check | on-off indicating whether to start consistency check |
+| mt | the number of auto-backup threads |
 
 ## Request Sample
 

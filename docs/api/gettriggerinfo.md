@@ -19,3 +19,45 @@ Get trigger information.
   "dbname": "demodb"
 }
 ```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| triggerinfo | the list of the triggers of the database |
+
+### triggerinfo
+
+triggerinfo is composed of `trigger` objects whose keys are the ones of
+[addtrigger](addtrigger.md): name, conditiontime, eventtype, eventtarget, condition, action,
+status and priority.
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "42 ms",
+   "note" : "none",
+   "status" : "success",
+   "task" : "gettriggerinfo",
+   "triggerinfo" : [
+      {
+         "trigger" : [
+            {
+               "action" : "REJECT",
+               "condition" : "1=1",
+               "conditiontime" : "BEFORE",
+               "eventtarget" : "history(score)",
+               "eventtype" : "STATEMENT UPDATE",
+               "name" : "example",
+               "priority" : "0.00",
+               "status" : "ACTIVE"
+            }
+         ]
+      }
+   ]
+}
+```

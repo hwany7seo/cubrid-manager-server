@@ -8,6 +8,8 @@ Change a manager user password.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| targetid | the id of the CM user whose password is changed |
+| newpassword | the new password |
 
 ## Request Sample
 

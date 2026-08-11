@@ -18,3 +18,26 @@ Get volume status.
   "dbname": "demodb"
 }
 ```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| volpath | the directory the database volumes are created in |
+| freespace | the free space of that directory, in MB |
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "2 ms",
+   "freespace" : "51234",
+   "note" : "none",
+   "status" : "success",
+   "task" : "getaddvolstatus",
+   "volpath" : "/home/cubrid/CUBRID/databases/demodb"
+}
+```

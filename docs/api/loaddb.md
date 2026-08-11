@@ -23,6 +23,8 @@ The loaddb interface will load a database from files.
 | no-user-specified-name | Find classes, serials, and triggers by their object names without their owner names |
 | schema-file-list | name of schema-file-list, list of schema file names to be used in loaddb |
 | delete_orignal_files | delete original file after load |
+| statisticsuse | y or n, update the statistics after the load |
+| trigger | the full path of the trigger file to be loaded |
 
 ## Request Sample
 
@@ -43,5 +45,29 @@ The loaddb interface will load a database from files.
   "errorcontrolfile": "none",
   "ignoreclassfile": "none",
   "delete_orignal_files": "y"
+}
+```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| line | a line of the output of the `cubrid loaddb` utility |
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "842 ms",
+   "line" : [
+      "Total   1000 objects processed.",
+      ""
+   ],
+   "note" : "none",
+   "status" : "success",
+   "task" : "loaddb"
 }
 ```

@@ -8,6 +8,8 @@ Get auto backup error logs.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| start_time | the beginning of the period, in the `YYYY-MM-DD HH:MM:SS` form |
+| end_time | the end of the period, in the `YYYY-MM-DD HH:MM:SS` form |
 
 ## Request Sample
 
@@ -18,3 +20,42 @@ Get auto backup error logs.
 }
 ```
 
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| error | the list of the auto-backup errors of the requested period |
+
+### error
+
+error is composed of objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| dbname | database name |
+| backupid | the id of the auto-backup plan which failed |
+| error_time | the time the error occurred |
+| error_desc | the description of the error |
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "4 ms",
+   "error" : [
+      {
+         "backupid" : "backup1",
+         "dbname" : "demodb",
+         "error_desc" : "Backup failed. Not enough space.",
+         "error_time" : "2026-08-11 03:00:02"
+      }
+   ],
+   "note" : "none",
+   "status" : "success",
+   "task" : "getautobackupdberrlog"
+}
+```

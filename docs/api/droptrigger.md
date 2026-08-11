@@ -8,6 +8,8 @@ Drop a trigger.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| dbname | database name |
+| triggername | the name of the trigger to be dropped |
 
 ## Request Sample
 

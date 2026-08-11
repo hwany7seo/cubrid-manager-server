@@ -21,3 +21,31 @@ Run plandump utility.
   "plandrop": "y"
 }
 ```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| log | the lines of the query plan cache of the database server |
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "37 ms",
+   "log" : [
+      {
+         "line" : "Query Plan Cache Information"
+      },
+      {
+         "line" : "Max_entries:1000 Num_entries:12"
+      }
+   ],
+   "note" : "none",
+   "status" : "success",
+   "task" : "plandump"
+}
+```

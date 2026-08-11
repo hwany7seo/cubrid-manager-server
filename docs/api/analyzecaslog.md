@@ -8,6 +8,9 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| logfilelist | the list of the broker SQL log files to be analyzed. Every element is an object which holds a `logfile` key |
+| logfile | the full path of a broker SQL log file |
+| option_t | yes or no, analyze the log by transaction |
 
 ## Request Sample
 

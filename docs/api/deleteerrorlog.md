@@ -2,6 +2,11 @@
 
 Delete error log files.
 
+
+**This interface is no longer supported.** The `deleteerrorlog` task is not registered by the current
+manager server, a request which uses it fails with `Undefined request - deleteerrorlog`.
+Use [removelog](removelog.md) to delete the error log files instead.
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |

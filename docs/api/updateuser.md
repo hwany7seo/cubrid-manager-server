@@ -11,6 +11,9 @@ Update database user information.
 | dbname | database name |
 | username | database user name |
 | password | user password |
+| userpass | database user password |
+| groups | the groups the database user belongs to |
+| authorization | authorities of this user |
 
 ## Request Sample
 

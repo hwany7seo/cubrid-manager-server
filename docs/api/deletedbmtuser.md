@@ -8,6 +8,7 @@ The deletedbmtuser interface deletes a specified manager user.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| targetid | the id of the CM user to be deleted |
 
 ## Request Sample
 

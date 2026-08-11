@@ -8,6 +8,9 @@ Change active status on broker.
 | --- | --- |
 | task | task name |
 | token | token string encrypted. |
+| dbname | database name |
+| modify | the new HA mode of the database server: standby, maintenance or active. When it is omitted, the current mode is returned without being changed |
+| force | yes or no, change the mode even when the transactions are not finished |
 
 ## Request Sample
 
@@ -18,5 +21,26 @@ Change active status on broker.
   "dbname": "demodb",
   "modify": "active",
   "force": "y"
+}
+```
+
+## Response JSON Syntax
+
+| **Key** | **Description** |
+| --- | --- |
+| task | task name |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
+| server_mode | the HA mode of the database server after the request: standby, maintenance or active |
+
+## Response Sample
+
+```
+{
+   "__EXEC_TIME" : "121 ms",
+   "note" : "none",
+   "server_mode" : "active",
+   "status" : "success",
+   "task" : "changemode"
 }
 ```
