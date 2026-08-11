@@ -1,111 +1,151 @@
-#! /usr/bin/env python
-import httplib,urllib
+#! /usr/bin/env python3
+import http.client
 import json
-import struct
-import os, sys
+import os
+import ssl
+import sys
+from getpass import getpass
+
+DEFAULT_PORT = 8001
+
 
 def findport():
+    """Read cm_port from the manager server configuration.
+
+    The port used to be taken from cm_httpd.conf, which does not exist any
+    more; cm.conf is the current configuration file.
+    """
     cubrid = os.environ.get("CUBRID")
-    conf = cubrid + "/conf/cm_httpd.conf"
-    cwm_find = False;
-    cf = open(conf, "r")
-    for line in cf:
-        idx = line.find("cwm.cubrid.org")
-        if idx > 0:
-            cwm_find = True
-        if cwm_find:
-            idx = line.find("server")
-            if idx > 0:
-                idx1 = line[idx:].find(":")
-                idx2 = line[idx:].find(";")
-                if idx1 < 0 or idx2 < 0:
-                    continue
-                return line[idx:][idx1+1:idx2]
+    if not cubrid:
+        print("CUBRID environment variable is not set.")
+        sys.exit(1)
 
-#cmsip="192.168.0.1"
-cmsip="localhost"
-port=int(findport())
-url="/cm_api"
-testdir="task_test_case_json/"
+    conf = os.path.join(cubrid, "conf", "cm.conf")
+    try:
+        with open(conf, "r") as cf:
+            for line in cf:
+                line = line.split("#", 1)[0].strip()
+                if line.startswith("cm_port"):
+                    _, _, value = line.partition("=")
+                    if value.strip().isdigit():
+                        return int(value.strip())
+    except IOError:
+        pass
 
-token=""
-CUBRID=""
-CUBRID_DATABASES=""
+    print("cm_port not found in %s, falling back to %d." % (conf, DEFAULT_PORT))
+    return DEFAULT_PORT
+
+
+cmsip = "localhost"
+port = findport()
+url = "/cm_api"
+testdir = "task_test_case_json/"
+
+token = ""
+CUBRID = ""
+CUBRID_DATABASES = ""
+
+nfailed = 0
+
+# The manager server serves cm_port over TLS with a self signed certificate,
+# so the certificate of the host under test is not verified here.
+ssl_context = ssl._create_unverified_context()
+
 
 def exec_task(ip, port, url, body):
-    conn = httplib.HTTPConnection(ip, port)
-    conn.request("POST", url, body)
-    resp = conn.getresponse().read()
-    conn.close()
-    return resp
+    conn = http.client.HTTPSConnection(ip, port, context=ssl_context)
+    try:
+        conn.request("POST", url, body)
+        return conn.getresponse().read()
+    finally:
+        conn.close()
+
 
 def load_task(taskfile):
-    task=open(taskfile, "r")
-    filebuf=task.read()
-    filebuf=filebuf.replace("$CUBRID_DATABASES", str(CUBRID_DATABASES))
-    filebuf=filebuf.replace("$CUBRID", str(CUBRID))
-    data = json.loads(filebuf)
+    with open(taskfile, "r") as task:
+        filebuf = task.read()
+    filebuf = filebuf.replace("$CUBRID_DATABASES", str(CUBRID_DATABASES))
+    filebuf = filebuf.replace("$CUBRID", str(CUBRID))
+    return json.loads(filebuf)
+
+
+def report(data):
+    global nfailed
+    if data.get("status") == "failure":
+        nfailed += 1
+        print(data.get("task", "?") + " : " +
+              '\033[31m{0}\033[0m'.format(data.get("note", "")))
+    else:
+        print(data.get("task", "?") + " : " +
+              '\033[32m{0}\033[0m'.format(data.get("status")))
+
+
+def send_one(req, token):
+    global nfailed
+    req["token"] = token
+    response = exec_task(cmsip, port, url, json.dumps(req))
+    try:
+        data = json.loads(response.decode())
+    except ValueError:
+        nfailed += 1
+        print(req.get("task", "?") + " : " +
+              '\033[31mnon JSON response: {0}\033[0m'.format(response[:200]))
+        return {"task": req.get("task", "?"), "status": "failure"}
+    report(data)
     return data
+
 
 def do_one_job(taskfile, token):
     request = load_task(taskfile)
-    if list == type(request):
+    if isinstance(request, list):
         for req in request:
-            req["token"] = token
-            response = exec_task(cmsip, port, url, json.dumps(req))
-            data=json.loads(response.decode())
-            if data["status"] == "failure":
-                print (data["task"] + " : " + '\033[31m{0}\033[0m'.format(data["note"]))
-            else:
-                print (data["task"] + " : " + '\033[32m{0}\033[0m'.format(data["status"]))
+            data = send_one(req, token)
     else:
-        req = request
-        req["token"] = token
-        response = exec_task(cmsip, port, url, json.dumps(req))
-        data=json.loads(response.decode())
-        if data["status"] == "failure":
-            print (data["task"] + " : " + '\033[31m{0}\033[0m'.format(data["note"]))
-        else:
-            print (data["task"] + " : " + '\033[32m{0}\033[0m'.format(data["status"]))
+        data = send_one(request, token)
     return data
 
 
 def do_all_jobs(token):
     if len(sys.argv) == 1:
-        tasks=open("task_list.txt", "r")
+        listfile = "task_list.txt"
     else:
-        tasks=open(sys.argv[1], "r")
-    for data in tasks:
-        data=data.rstrip()
-        if data == "":
-            continue
-        if data[0] == '/':
-            print '\n\033[33m{0}\033[0m'.format(data)
-            continue
-        do_one_job(testdir+data+".txt", token)
+        listfile = sys.argv[1]
+    with open(listfile, "r") as tasks:
+        for data in tasks:
+            data = data.rstrip()
+            if data == "":
+                continue
+            if data[0] == '/':
+                print('\n\033[33m{0}\033[0m'.format(data))
+                continue
+            do_one_job(testdir + data + ".txt", token)
+
 
 def init_env():
-    response = do_one_job(testdir+"/login.txt", "")
+    response = do_one_job(testdir + "/login.txt", "")
     if response["status"] == "failure":
-        request = load_task(testdir+"/login.txt")
-        passwd = raw_input("Please input the passwd for %s: " %(request["id"]))
-        request["password"] = passwd
-        response = exec_task(cmsip, port, url, json.dumps(request))
-        data=json.loads(response.decode())
-        if data["status"] == "failure":
-            print (data["task"] + " : " + '\033[31m{0}\033[0m'.format(data["note"]))
-        else:
-            print (data["task"] + " : " + '\033[32m{0}\033[0m'.format(data["status"]))
-        response = data
+        request = load_task(testdir + "/login.txt")
+        request["password"] = getpass(
+            "Please input the passwd for %s: " % (request["id"]))
+        response = send_one(request, "")
+        if response["status"] == "failure":
+            print("login failed, cannot run the tests.")
+            sys.exit(1)
     token = response["token"]
-    response = do_one_job(testdir+"/getenv.txt", token)  
+    response = do_one_job(testdir + "/getenv.txt", token)
     bindir = response["CUBRID"]
     datadir = response["CUBRID_DATABASES"]
     return token, bindir, datadir
 
+
 token, CUBRID, CUBRID_DATABASES = init_env()
-#print (token, CUBRID, CUBRID_DATABASES)
-#do_one_job("task_json/renamedb.txt", token)
+# The login and the getenv calls above are the ones that set up the session,
+# their failures are counted from the task list only.
+nfailed = 0
 do_all_jobs(token)
 
-exec_task(cmsip, port, "/upload", "")
+if nfailed:
+    print("\n\033[31m%d task(s) failed.\033[0m" % nfailed)
+    sys.exit(1)
+
+print("\n\033[32mall tasks succeeded.\033[0m")

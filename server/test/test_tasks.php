@@ -4,7 +4,7 @@ error_reporting (E_ALL);
 
 define ("CM_PORT", 8001);
 define ("CM_SERVER_IP", "127.0.0.1");
-define ("CLIENT_VERSION", "8.2.2");
+define ("CLIENT_VERSION", "11.5.0");
 define ("TEST_CASE_DIR", "task_test_case/");
 define ("TEST_RESULT_DIR", "task_test_result/");
 define ("TEST_CONFIG_DIR", "task_test_config/");
@@ -21,6 +21,11 @@ if(!$cubrid_env || !$cubrid_database_env){
 }
 
 $outputfile = $argv[1];
+$dirPath = dirname($outputfile);
+if (!file_exists($dirPath)) {
+    mkdir($dirPath, 0755, true);
+}
+
 $outfp = fopen($outputfile, "w");
 if(!$outfp){
     echo "failed to create output file: ".$outputfile."\n";

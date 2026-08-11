@@ -19,8 +19,11 @@ confdata:#  This program is distributed in the hope that it will be useful,
 	confdata:#  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA
 	confdata:
 confdata:#
-confdata:allow_user_multi_connection YES
-confdata:monitor_interval 5
-confdata:cm_port 8001
-confdata:server_long_query_time 10
+confdata:allow_user_multi_connection=YES
+confdata:monitor_interval=5
+confdata:cm_port=8001
+confdata:server_long_query_time=10
+confdata:auto_job_timeout=43200
+confdata:support_mon_statistic=YES
+confdata:max_log_files=10
 

@@ -19,7 +19,7 @@ int init_transfer()
     int sock = -1;
     struct sockaddr_in addr;
 
-    printf("init transfer бнбн/n");
+    printf("init transfer ...\n");
     sock =  socket(PF_INET, SOCK_STREAM, 0);
     if(-1 == sock)
     {
@@ -32,7 +32,7 @@ int init_transfer()
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     addr.sin_port = htons(TRANSFER_PORT);
     transfer_sock = sock;
-    printf("%s: init transfer socket %d бнбн success\n", __FUNCTION__, sock);
+    printf("%s: init transfer socket %d ... success\n", __FUNCTION__, sock);
     return 0;
 }
 
