@@ -1,8 +1,14 @@
 dbmtuserlogin
 updatedbmtuser_admin
+updatedbmtuser_nullid,failure
+updatedbmtuser_errformat,failure
 setdbmtpasswd_admin
 
-login_errver
+login_errver,failure
+login_nullid,failure
+login_notask,failure
+login_nouser,failure
+login_errpasswd,failure
 setloglevel
 getcmsenv
 getprocstat
@@ -11,26 +17,51 @@ startinfo
 
 getdbmtuserinfo
 userverify
+userverify_fail,failure
 adddbmtuser
+adddbmtuser_existid,failure
+adddbmtuser_nullid,failure
+adddbmtuser_nullpasswd,failure
 setdbmtpasswd
+setdbmtpasswd_errid,failure
+setdbmtpasswd_errpasswd,failure
+setdbmtpasswd_nullid,failure
+setdbmtpasswd_nullpasswd,failure
 updatedbmtuser_newuser
 
 checkdir
 
 createdb
-createdb_fail_with_dup_name
+createdb_accesslog,failure
+createdb_errlogpath,failure
+createdb_errlogpath1,failure
+createdb_errvolpath,failure
+createdb_nulldbname,failure
+createdb_nulllogsize,failure
+createdb_nullnumpage,failure
+createdb_nullpagesize,failure
+createdb_nullvolpath,failure
+createdb_fail_with_dup_name,failure
 startdb
+startdb_fail,failure
 
 checkdb
+checkdb_nullname,failure
 getdbsize
 gettransactioninfo
 killtransaction
 
 // add vol, then spacedb
 addvoldb
+addvoldb_bigsize,failure
+addvoldb_nullpurpose,failure
+addvoldb_nullsize,failure
 dbspaceinfo
 lockdb
 backupdb
+backupdb_nulldir,failure
+backupdb_nullname,failure
+backupdb_rep,failure
 backupdbinfo
 
 // test auto tasks.
@@ -51,6 +82,12 @@ loaddb
 restoredb
 compactdb
 copydb
+copydb_nulldest,failure
+copydb_nulldestpath,failure
+copydb_nullexvolpath,failure
+copydb_nulllogpath,failure
+copydb_nullop,failure
+copydb_nullsrc,failure
 
 addstatustemplate
 updatestatustemplate
@@ -78,8 +115,16 @@ startinfo
 
 /* delete new database */
 deletedbmtuser
+deletedbmtuser_erruser,failure
+deletedbmtuser_nullid,failure
 renamedb
+renamedb_nullrename,failure
+renamedb_adoff,failure
+renamedb_erropen,failure
 unloaddb
+unloaddb_nullname,failure
+unloaddb_nulltarget,failure
+unloaddb_nulltargetdir,failure
 deletedb
 
 /* broker api related tasks */
@@ -90,8 +135,14 @@ getbrokerdiagdata
 getbrokersinfo
 getbrokerstatus
 broker_stop
+broker_stop_errbroker,failure
+broker_stop_nullbroker,failure
 broker_start
+broker_start_errbroker,failure
+broker_start_nullbroker,failure
 broker_restart
+broker_restart_errbroker,failure
+broker_restart_nullbroker,failure
 //broker_setparam,
 deletebroker
 executecasrunner
@@ -104,6 +155,8 @@ updateattribute
 userinfo
 createuser
 updateuser
+updateuser_nullpasswd,failure
+updateuser_nopasswd,failure
 deleteuser
 /* other tasks */
 unloadinfo
@@ -113,14 +166,19 @@ analyzecaslog
 analyzecaslog_option_no
 getadminloginfo
 getallsysparam
+getallsysparam_errorconf,failure
+getallsysparam_nullconf,failure
 getenv
 resetlog
 
 getcaslogtopresult
 removecasrunnertmpfile
 paramdump
+paramdump_nullname,failure
 statdump
+statdump_nullname,failure
 plandump
+plandump_nullname,failure
 
 // create a new database to test copydb.
 createdb_for_copydb
@@ -139,12 +197,14 @@ getdbmode
 
 // tasks set conf files
 setsysparam_cmconf
+// setsysparam_errconf: 서버가 임의 confname을 $CUBRID/conf 아래 파일로 받아들이도록
+// 바뀌어 더 이상 실패하지 않는다. 아래 참고 항목의 판단이 끝날 때까지 비활성화.
+//setsysparam_errconf,failure
+setsysparam_nullconf,failure
 //setsysparam_cubridconf
 //broker_setparam
 getdiagdata
 killprocess
-
-//
 
 getenvvarbyname
 copyfolder
