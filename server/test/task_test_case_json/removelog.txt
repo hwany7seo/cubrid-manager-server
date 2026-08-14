@@ -1,4 +1,4 @@
 {"task":"removelog",
-"token":"REPLACED_BY_HARNESS",
+"token":"",
 "files":[{"path":"$CUBRID/tmp/test_removelog.log"}]
 }

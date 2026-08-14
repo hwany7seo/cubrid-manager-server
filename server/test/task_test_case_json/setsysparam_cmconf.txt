@@ -1,5 +1,5 @@
 {"task":"setsysparam",
-"token":"cdfb4c5717170c5e942a1cf0685a4d40ba4969ddfab4169f75fd3469cebc3f967926f07dd201b6aa",
+"token":"",
 "confname":"cmconf",
 "confdata":[
 "#",
@@ -21,4 +21,5 @@
 "allow_user_multi_connection YES",
 "monitor_interval 5",
 "cm_port 8001",
-"server_long_query_time 10"]}
+"server_long_query_time 10",
+"support_mon_statistic YES"]}

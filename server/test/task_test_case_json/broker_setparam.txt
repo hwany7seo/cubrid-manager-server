@@ -1,5 +1,5 @@
 {"task":"broker_setparam",
-"token":"cdfb4c5717170c5e942a1cf0685a4d40251d18395ef56a5f2ba8a5984e6435207926f07dd201b6aa",
+"token":"",
 "confdata":[
 "#",
 "# Copyright (C) 2009 Search Solution Corporation. All rights reserved by Search Solution.",

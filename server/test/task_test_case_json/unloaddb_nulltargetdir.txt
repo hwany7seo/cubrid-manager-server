@@ -1,5 +1,5 @@
 {"task":"unloaddb",
-"token":"cdfb4c5717170c5e34919b640249979f8375a218acf865b0b8100f0f25c069587926f07dd201b6aa",
+"token":"",
 "dbname":"demodb",
 "usehash":"no",
 "hashdir":"none",

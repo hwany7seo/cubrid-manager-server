@@ -3,28 +3,28 @@
         "task":"get_mon_statistic" ,
         "metric" : "vol_freespace" ,
         "dbname" : "demodb" ,
-        "volname" : "demodb" ,
+        "volname" : "$CUBRID_DATABASES/demodb/demodb" ,
         "dtype" : "daily"
     },
     {
         "task" : "get_mon_statistic" ,
         "metric" : "vol_freespace" ,
         "dbname" : "demodb" ,
-        "volname" : "demodb" ,
+        "volname" : "$CUBRID_DATABASES/demodb/demodb" ,
         "dtype" : "weekly"
     },
     {
         "task" : "get_mon_statistic" ,
         "metric" : "vol_freespace" ,
         "dbname" : "demodb" ,
-        "volname" : "demodb" ,
+        "volname" : "$CUBRID_DATABASES/demodb/demodb" ,
         "dtype" : "monthly"
     },
     {
         "task" : "get_mon_statistic", 
         "metric" : "vol_freespace", 
         "dbname" : "demodb", 
-        "volname" : "demodb", 
+        "volname" : "$CUBRID_DATABASES/demodb/demodb", 
         "dtype" : "yearly"
     },
     {

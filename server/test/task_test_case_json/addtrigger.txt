@@ -1,5 +1,5 @@
 {"task":"addtrigger",
-"token":"8ec1ab8a91333c7812b01dad653e9472ac3797d549ff3a79b1675dadedea4cd47926f07dd201b6aa",
+"token":"",
 "dbname":"demodb",
 "triggername":"example",
 "conditiontime":"BEFORE",
