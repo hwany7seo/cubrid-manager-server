@@ -34,6 +34,30 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
+| resultlist | the list of the analysis results, one entry per query |
+| resultfile | the full path of the temporary file which holds the analysis result. It is passed as the `filename` of [getcaslogtopresult](getcaslogtopresult.md) to read the query text of an entry |
+
+### resultlist
+
+resultlist is composed of `result` objects. The keys of a `result` object depend on `option_t`.
+
+When `option_t` is `yes` (analysis by transaction):
+
+| **Key** | **Description** |
+| --- | --- |
+| qindex | the query index, such as `[Q1]` |
+| exec_time | the elapsed time of the transaction |
+
+Otherwise (analysis by query):
+
+| **Key** | **Description** |
+| --- | --- |
+| qindex | the query index, such as `[Q1]` |
+| max | the maximum execution time of the query |
+| min | the minimum execution time of the query |
+| avg | the average execution time of the query |
+| cnt | the number of times the query was executed |
+| err | the number of executions which ended with an error |
 
 ## Response Sample
 
@@ -41,6 +65,21 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
 {
    "__EXEC_TIME" : "72 ms",
    "note" : "none",
+   "resultfile" : "/home/cubrid/CUBRID/tmp/analyzelog_res_1234",
+   "resultlist" : [
+      {
+         "result" : [
+            {
+               "avg" : "0.003",
+               "cnt" : "12",
+               "err" : "0",
+               "max" : "0.011",
+               "min" : "0.001",
+               "qindex" : "[Q1]"
+            }
+         ]
+      }
+   ],
    "status" : "success",
    "task" : "analyzecaslog"
 }

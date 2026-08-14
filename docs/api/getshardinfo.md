@@ -52,6 +52,10 @@ shard is composed of objects with following structure
 | long_query | the number of the long queries |
 | long_query_time | the threshold time of a long query |
 | error_query | the number of the queries which ended with an error |
+| access_mode | the access mode of the shard broker, such as RW or RO |
+| state | the state of the shard broker |
+| sqll | the SQL log mode of the shard broker |
+| canceled | the number of the canceled requests |
 
 ## Response Sample
 

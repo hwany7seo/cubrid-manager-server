@@ -39,6 +39,11 @@ The gettransactioninfo interface fetches database transaction information.
 | host | host name |
 | pid | process id |
 | program | process name |
+| query_time | the elapsed time of the running query |
+| tran_time | the elapsed time of the transaction |
+| SQL_ID | the id of the running SQL |
+| SQL_Text | the text of the running SQL |
+| wait_for_lock_holder | the transaction indexes this transaction waits for |
 
 ## Response Sample
 

@@ -58,6 +58,11 @@ other letters should cause an error. 
 | host | host name |
 | pid | process id |
 | program | process name |
+| query_time | the elapsed time of the running query |
+| tran_time | the elapsed time of the transaction |
+| SQL_ID | the id of the running SQL |
+| SQL_Text | the text of the running SQL |
+| wait_for_lock_holder | the transaction indexes this transaction waits for |
 
 ## Response Sample
 
@@ -68,16 +73,21 @@ other letters should cause an error. 
    "note" : "none",
    "status" : "success",
    "task" : "killtransaction",
-   "transactioninfo" : 
+   "transactioninfo" : [
       {
          "transaction" : [
             {
                "@user" : "DBA",
-               "host" : "huangqiyu-VirtualBox",
+               "host" : "cubrid-host",
+               "SQL_ID" : "82353eb5cc51f",
+               "SQL_Text" : "select * from code",
                "pid" : "6632",
                "program" : "query_editor_cub_cas_1",
+               "query_time" : "0.40",
+               "tran_time" : "0.40",
                "tranindex" : "1(ACTIVE)"
             }
+         ]
       }
    ]
 }

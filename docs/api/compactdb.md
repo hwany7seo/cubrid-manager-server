@@ -29,12 +29,29 @@ Compact database.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
+| log | the output of the compactdb utility |
+
+### log
+
+log is composed of objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| line | a line of the compactdb output |
 
 ## Response Sample
 
 ```
 {
    "__EXEC_TIME" : "320 ms",
+   "log" : [
+      {
+         "line" : "Classes to process: 12"
+      },
+      {
+         "line" : "Compacting class 'code'..."
+      }
+   ],
    "note" : "none",
    "status" : "success",
    "task" : "compactdb"

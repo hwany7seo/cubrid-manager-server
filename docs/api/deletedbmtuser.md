@@ -27,6 +27,32 @@ The deletedbmtuser interface deletes a specified manager user.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
+| dblist | the list of the databases of the host |
+| userlist | the updated list of the CM users |
+
+### dblist
+
+dblist is composed of `dbs` objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| dbname | database name |
+
+### userlist
+
+userlist is composed of `user` objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| @id | the id of the CM user |
+| casauth | the broker authority of the CM user |
+| dbcreate | the database creation authority of the CM user |
+| statusmonitorauth | the monitoring authority of the CM user |
+| dbauth | the databases the CM user takes in charge of |
+| dbname | database name |
+| dbbrokeraddress | the address of the broker used to connect to that database |
+
+See [getdbmtuserinfo](getdbmtuserinfo.md) for the same structure in detail.
 
 
 ## Response Sample
@@ -34,8 +60,39 @@ The deletedbmtuser interface deletes a specified manager user.
 ```
 {
    "__EXEC_TIME" : "72 ms",
+   "dblist" : [
+      {
+         "dbs" : [
+            {
+               "dbname" : "demodb"
+            }
+         ]
+      }
+   ],
    "note" : "none",
    "status" : "success",
-   "task" : "deletedbmtuser"
+   "task" : "deletedbmtuser",
+   "userlist" : [
+      {
+         "user" : [
+            {
+               "@id" : "admin",
+               "casauth" : "admin",
+               "dbauth" : [
+                  {
+                     "auth_info" : [
+                        {
+                           "dbbrokeraddress" : "localhost,30000",
+                           "dbname" : "demodb"
+                        }
+                     ]
+                  }
+               ],
+               "dbcreate" : "admin",
+               "statusmonitorauth" : "admin"
+            }
+         ]
+      }
+   ]
 }
 ```

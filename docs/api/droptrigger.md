@@ -29,6 +29,7 @@ Drop a trigger.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
+| dbname | database name |
 
 ## Response Sample
 

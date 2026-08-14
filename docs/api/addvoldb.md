@@ -32,6 +32,8 @@ Add a new volume.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
+| dbname | database name |
+| purpose | the purpose of the added volume, such as data, index, temp or generic |
 
 ## Response Sample
 

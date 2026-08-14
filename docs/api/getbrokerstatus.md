@@ -28,6 +28,7 @@ Get broker status.
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
 | bname | broker name |
+| time | the time the status was collected |
 | asinfo | cas' information |
 | as_id | cas id |
 | as_pid | cas process id |
@@ -45,118 +46,74 @@ Get broker status.
 | as_long_tran | the number of complicated transactions |
 | as_num_query | the number of queries |
 | as_num_tran | the number of transactions |
+| as_c | the number of the current connections of the cas |
+| as_lct | the last connect time of the cas |
+| as_port | the port of the application server. It is returned on Windows only |
+| jobinfo | the list of the jobs waiting in the queue of the broker. It is returned only when the queue is not empty |
+
+### jobinfo
+
+jobinfo is composed of objects with following structure
+
+| **Key** | **Description** |
+| --- | --- |
+| job_id | the id of the job |
+| job_priority | the priority of the job |
+| job_ip | the client ip address of the job |
+| job_time | the time the job was received |
+| job_request | the request of the job |
 
 ## Response Sample
 
-```json
+```
 {
-   "__EXEC_TIME" : "51 ms",
-   "asinfo" : [
+   "__EXEC_TIME": "2 ms",
+   "asinfo": [
       {
-         "as_c" : "0",
-         "as_client_ip" : "0.0.0.0",
-         "as_cpu" : "0.00",
-         "as_ctime" : "0:00",
-         "as_cur" : "",
-         "as_dbhost" : "",
-         "as_dbname" : "",
-         "as_error_query" : "0",
-         "as_id" : "1",
-         "as_lat" : "2013/02/01 15:30:23",
-         "as_lct" : "",
-         "as_long_query" : "0",
-         "as_long_tran" : "0",
-         "as_num_query" : "0",
-         "as_num_tran" : "0",
-         "as_pid" : "2263",
-         "as_psize" : "25532",
-         "as_status" : "IDLE"
+         "as_c": "0",
+         "as_client_ip": "0.0.0.0",
+         "as_cpu": "0.00",
+         "as_ctime": "0:00",
+         "as_cur": "",
+         "as_dbhost": "",
+         "as_dbname": "",
+         "as_error_query": "0",
+         "as_id": "1",
+         "as_lat": "2026/08/11 13:30:57",
+         "as_lct": "",
+         "as_long_query": "0",
+         "as_long_tran": "0",
+         "as_num_query": "0",
+         "as_num_tran": "0",
+         "as_pid": "0",
+         "as_psize": "-1",
+         "as_status": "CLIENT WAIT"
       },
       {
-         "as_c" : "0",
-         "as_client_ip" : "0.0.0.0",
-         "as_cpu" : "0.00",
-         "as_ctime" : "0:00",
-         "as_cur" : "",
-         "as_dbhost" : "",
-         "as_dbname" : "",
-         "as_error_query" : "0",
-         "as_id" : "2",
-         "as_lat" : "2013/02/01 15:30:23",
-         "as_lct" : "",
-         "as_long_query" : "0",
-         "as_long_tran" : "0",
-         "as_num_query" : "0",
-         "as_num_tran" : "0",
-         "as_pid" : "2264",
-         "as_psize" : "25532",
-         "as_status" : "IDLE"
-      },
-      {
-         "as_c" : "0",
-         "as_client_ip" : "0.0.0.0",
-         "as_cpu" : "0.00",
-         "as_ctime" : "0:00",
-         "as_cur" : "",
-         "as_dbhost" : "",
-         "as_dbname" : "",
-         "as_error_query" : "0",
-         "as_id" : "3",
-         "as_lat" : "2013/02/01 15:30:23",
-         "as_lct" : "",
-         "as_long_query" : "0",
-         "as_long_tran" : "0",
-         "as_num_query" : "0",
-         "as_num_tran" : "0",
-         "as_pid" : "2265",
-         "as_psize" : "25532",
-         "as_status" : "IDLE"
-      },
-      {
-         "as_c" : "0",
-         "as_client_ip" : "0.0.0.0",
-         "as_cpu" : "0.00",
-         "as_ctime" : "0:00",
-         "as_cur" : "",
-         "as_dbhost" : "",
-         "as_dbname" : "",
-         "as_error_query" : "0",
-         "as_id" : "4",
-         "as_lat" : "2013/02/01 15:30:23",
-         "as_lct" : "",
-         "as_long_query" : "0",
-         "as_long_tran" : "0",
-         "as_num_query" : "0",
-         "as_num_tran" : "0",
-         "as_pid" : "2266",
-         "as_psize" : "25532",
-         "as_status" : "IDLE"
-      },
-      {
-         "as_c" : "0",
-         "as_client_ip" : "0.0.0.0",
-         "as_cpu" : "0.00",
-         "as_ctime" : "0:00",
-         "as_cur" : "",
-         "as_dbhost" : "",
-         "as_dbname" : "",
-         "as_error_query" : "0",
-         "as_id" : "5",
-         "as_lat" : "2013/02/01 15:30:23",
-         "as_lct" : "",
-         "as_long_query" : "0",
-         "as_long_tran" : "0",
-         "as_num_query" : "0",
-         "as_num_tran" : "0",
-         "as_pid" : "2267",
-         "as_psize" : "25532",
-         "as_status" : "IDLE"
+         "as_c": "0",
+         "as_client_ip": "0.0.0.0",
+         "as_cpu": "0.00",
+         "as_ctime": "0:00",
+         "as_cur": "",
+         "as_dbhost": "",
+         "as_dbname": "",
+         "as_error_query": "0",
+         "as_id": "2",
+         "as_lat": "2026/08/11 13:30:57",
+         "as_lct": "",
+         "as_long_query": "0",
+         "as_long_tran": "0",
+         "as_num_query": "0",
+         "as_num_tran": "0",
+         "as_pid": "271739",
+         "as_psize": "7032",
+         "as_status": "IDLE"
       }
    ],
-   "bname" : "query_editor",
-   "note" : "none",
-   "status" : "success",
-   "task" : "getbrokerstatus",
-   "time" : "2013/02/01 15:41:08"
+   "bname": "query_editor",
+   "note": "none",
+   "status": "success",
+   "task": "getbrokerstatus",
+   "time": "2026/08/13 12:03:52"
 }
 ```
