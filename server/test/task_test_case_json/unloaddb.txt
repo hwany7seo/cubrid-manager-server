@@ -5,7 +5,7 @@
 "usehash":"no",
 "hashdir":"none",
 "target":"both",
-"class":[{"classname":"code"}],
+"class":[{"classname":"public.code"}],
 "ref":"no",
 "classonly":"no",
 "delimit":"no",

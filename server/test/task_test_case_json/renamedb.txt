@@ -3,6 +3,5 @@
 "dbname":"destinationdb",
 "rename":"anotherdb",
 "exvolpath":"none",
-"advanced":"on",
-"volume":[{"$CUBRID_DATABASES/destinationdb/destinationdb":"$CUBRID_DATABASES/anotherdb/anotherdb"}],
+"advanced":"off",
 "forcedel":"y"}

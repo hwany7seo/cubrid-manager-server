@@ -1,0 +1,2 @@
+{"task":"getshardinfo",
+"token":"REPLACED_BY_HARNESS"}

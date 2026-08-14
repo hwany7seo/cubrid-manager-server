@@ -4,7 +4,7 @@
 "triggername":"example",
 "conditiontime":"BEFORE",
 "eventtype":"STATEMENT UPDATE",
-"action":"REJECT",
+"action":"REJECT;",
 "eventtarget":"history(score)",
 "condition":"1=1",
 "status":"ACTIVE",
