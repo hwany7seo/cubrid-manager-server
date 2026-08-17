@@ -37,7 +37,7 @@ The database information file of CMS is rewritten after the signal is sent.
 
 ```
 {
-   "__EXEC_TIME" : "4 ms",
+   "__EXEC_TIME" : "25 ms",
    "name" : "cub_server demodb",
    "note" : "none",
    "status" : "success",

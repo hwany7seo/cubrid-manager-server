@@ -34,12 +34,16 @@ file open error because those files do not exist.
 
 ## Response Sample
 
+What the task actually answers on a server where autoupdate was never run:
+
 ```
 {
-   "__EXEC_TIME" : "2 ms",
-   "autoupdate_success" : "success",
-   "note" : "none",
-   "status" : "success",
+   "__EXEC_TIME" : "0 ms",
+   "note" : "File(/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/cms_auto_update.log) open error",
+   "status" : "failure",
    "task" : "isupdatesuccess"
 }
 ```
+
+`autoupdate_success` / `autoupdate_result` are only present when the log file
+exists, which needs an [autoupdate](autoupdate.md) run — no longer possible.

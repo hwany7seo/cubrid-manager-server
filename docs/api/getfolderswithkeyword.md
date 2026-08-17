@@ -44,12 +44,8 @@ folders is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "2 ms",
-   "folders" : [
-      {
-         "foldername" : "demodb"
-      }
-   ],
+   "__EXEC_TIME" : "0 ms",
+   "folders" : null,
    "note" : "none",
    "status" : "success",
    "task" : "getfolderswithkeyword"

@@ -46,7 +46,7 @@ templatelist is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "3 ms",
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getstatustemplate",
@@ -54,13 +54,25 @@ templatelist is composed of objects with following structure
       {
          "template" : [
             {
+               "cas_st_active_session" : "0.1",
+               "cas_st_request" : "0.1",
+               "cas_st_transaction" : "0.1",
+               "close" : "target_config",
+               "db_name" : " ",
+               "desc" : "status monitor template of broker",
+               "name" : "broker_template",
+               "sampling_term" : "1"
+            },
+            {
+               "_PROGNAME" : "ager",
+               "close" : "target_config",
                "db_name" : "demodb",
-               "desc" : "client_request",
+               "desc" : "status monitor template of demodb",
                "name" : "dbserver_clier_requet",
-               "sampling_term" : "5",
-               "target_config" : {
-                  "server_conn_cli_request" : "1"
-               }
+               "sampling_term" : "1",
+               "server_conn_cli_request" : "1",
+               "task" : "tatustemplate",
+               "token" : "a91333c783363ed09353f515b95f07f"
             }
          ]
       }

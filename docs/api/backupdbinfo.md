@@ -29,30 +29,32 @@ The backupdbinfo interface will get database backup information.
 | note | if failed, a brief description will be given here |
 | dbdir | the default backup directory of the database |
 | freespace | the free space of the database directory, in MB |
-| <volname> | the information of an existing backup volume, the key is the name of the volume |
+| level\<n\> | the backup volumes of that backup level, one key per level (`level0`, `level1`, ...) |
 
-### <volname>
+### level\<n\>
 
-Every backup volume is composed of objects with following structure
+Every backup level is composed of objects with following structure
 
 | **Key** | **Description** |
 | --- | --- |
 | path | the full path of the backup volume |
 | size | the size of the backup volume, in bytes |
+| data | the moment the backup was taken, `YYYY.MM.DD.HHMM` |
 
 ## Response Sample
 
 ```
 {
-   "__EXEC_TIME" : "8 ms",
-   "dbdir" : "/home/cubrid/CUBRID/databases/demodb/backup",
-   "demodb_backup_lv0" : [
+   "__EXEC_TIME" : "29 ms",
+   "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/backup",
+   "freespace" : "446128",
+   "level0" : [
       {
-         "path" : "/home/cubrid/CUBRID/databases/demodb/backup/demodb_backup_lv0",
-         "size" : "1148928"
+         "data" : "2026.08.18.07.40",
+         "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/backup/alatestdb_backup_lv0/alatestdb_bk0v000",
+         "size" : "2110464"
       }
    ],
-   "freespace" : "51234",
    "note" : "none",
    "status" : "success",
    "task" : "backupdbinfo"

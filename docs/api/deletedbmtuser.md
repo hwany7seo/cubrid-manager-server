@@ -59,10 +59,16 @@ See [getdbmtuserinfo](getdbmtuserinfo.md) for the same structure in detail.
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
+   "__EXEC_TIME" : "3 ms",
    "dblist" : [
       {
          "dbs" : [
+            {
+               "dbname" : "destinationdb"
+            },
+            {
+               "dbname" : "alatestdb"
+            },
             {
                "dbname" : "demodb"
             }
@@ -82,7 +88,18 @@ See [getdbmtuserinfo](getdbmtuserinfo.md) for the same structure in detail.
                   {
                      "auth_info" : [
                         {
-                           "dbbrokeraddress" : "localhost,30000",
+                           "@dbid" : "dba",
+                           "dbbrokeraddress" : "",
+                           "dbname" : "destinationdb"
+                        },
+                        {
+                           "@dbid" : "dba",
+                           "dbbrokeraddress" : "",
+                           "dbname" : "alatestdb"
+                        },
+                        {
+                           "@dbid" : "dba",
+                           "dbbrokeraddress" : "localhost,33000",
                            "dbname" : "demodb"
                         }
                      ]

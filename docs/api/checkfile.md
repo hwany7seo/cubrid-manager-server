@@ -31,7 +31,7 @@
 ```
 {
    "__EXEC_TIME" : "0 ms",
-   "existfile" : "/home/cubrid/CUBRID-11.5.0.2405-a2c3e03-Linux.x86_64/log/manager/cub_manager.log",
+   "existfile" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/manager/cub_manager.log",
    "note" : "none",
    "status" : "success",
    "task" : "checkfile"

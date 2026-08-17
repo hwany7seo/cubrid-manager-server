@@ -30,8 +30,8 @@ Close a session between manager server and manager client.
 
 ```
 {
-   "__EXEC_TIME" : "12 ms",
-   "note" : "none",
+   "__EXEC_TIME" : "1 ms",
+   "note" : "",
    "status" : "success",
    "task" : "logout"
 }

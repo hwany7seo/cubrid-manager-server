@@ -74,42 +74,44 @@ When the broker is running (`brokerstatus` is `ON`), each broker also carries it
 
 ```
 {
-   "__EXEC_TIME": "2 ms",
-   "brokersinfo": [
+   "__EXEC_TIME" : "1 ms",
+   "brokersinfo" : [
       {
-         "broker": [
+         "broker" : [
             {
-               "access_list": "0",
-               "access_mode": "RW",
-               "appl_server_shm_id": "30000",
-               "as": "5",
-               "auto": "ON",
-               "error_query": "0",
-               "jq": "0",
-               "keep_conn": "AUTO",
-               "log": "/home/cubrid/CUBRID-11.5.0.2405-a2c3e03-Linux.x86_64/log/broker",
-               "long_query": "0",
-               "long_query_time": "60.00",
-               "long_tran": "0",
-               "long_tran_time": "60.00",
-               "name": "query_editor",
-               "pid": "271737",
-               "port": "30000",
-               "query": "0",
-               "req": "0",
-               "ses": "300",
-               "source_env": "0",
-               "sqll": "ALL",
-               "state": "ON",
-               "tran": "0",
-               "type": "CAS"
+               "access_list" : "0",
+               "access_mode" : "RW",
+               "appl_server_shm_id" : "30000",
+               "as" : "5",
+               "auto" : "ON",
+               "error_query" : "0",
+               "jq" : "0",
+               "keep_conn" : "AUTO",
+               "log" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker",
+               "long_query" : "0",
+               "long_query_time" : "60.00",
+               "long_tran" : "0",
+               "long_tran_time" : "60.00",
+               "name" : "query_editor",
+               "pid" : "1875077",
+               "port" : "30000",
+               "query" : "0",
+               "req" : "0",
+               "ses" : "300",
+               "source_env" : "0",
+               "sqll" : "ALL",
+               "state" : "ON",
+               "tran" : "0",
+               "type" : "CAS"
             }
          ]
       }
    ],
-   "brokerstatus": "ON",
-   "note": "none",
-   "status": "success",
-   "task": "getbrokersinfo"
+   "brokerstatus" : "ON",
+   "note" : "none",
+   "status" : "success",
+   "task" : "getbrokersinfo"
 }
 ```
+
+> Lists are shortened to 1 entry here; the real response returned up to 2.

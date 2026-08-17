@@ -75,12 +75,17 @@ Get DB Volume monitoring statistic data
 {
   "task":"get_mon_statistic",
   "metric":"vol_freespace",
-  "dtype":"yearly",
-  "dbname":"db1",
-  "volname":"testdb",
+  "dtype":"daily",
+  "dbname":"demodb",
+  "volname":"/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb",
    "token":"xxxxxxx"
 }
 ```
+
+`volname` has to be the name the server registered for the volume, which is the
+full path `dbspaceinfo` reports for it. A bare database name is rejected with
+`Can't find volname[...] in DB [...] meta[k_db_rrd]`. The Response Sample below
+is the answer to this request.
 
 Get os monitoring statistics data
 
@@ -101,7 +106,8 @@ Get os monitoring statistics data
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
 | dbname | database name |
-| bname | database broker name |
+| bname | broker name, echoed back for the broker metrics |
+| volname | volume name, echoed back for the `vol_*` metrics. It is the full path the server registered, as `dbspaceinfo` reports it |
 | data | an interge array of monitoring data |
 | dtype | data type. daily, weekly, monthly or yearly |
 | metric | The metric of database, broker, volume or host |
@@ -110,12 +116,15 @@ Get os monitoring statistics data
 
 ```json
 {
-  "task":"get_mon_statistic",
-  "metric":"broker_long_t",
-  "dtype":"monthly", 
-  "bname":"broker1",
-  "status": "success",
-  "note":"none",
-  "data":[11,17,23,42,24,12,15]
+   "data" : [ -1, -1, -1 ],
+   "dbname" : "demodb",
+   "dtype" : "daily",
+   "metric" : "vol_freespace",
+   "note" : "none",
+   "status" : "success",
+   "task" : "get_mon_statistic",
+   "volname" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb"
 }
 ```
+
+> Lists are shortened to 3 entries here; the real response returned up to 1080.

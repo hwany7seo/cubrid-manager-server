@@ -39,9 +39,11 @@ Add a new volume.
 
 ```
 {
-  "__EXEC_TIME": "72 ms",
-  "note": "none",
-  "status": "success",
-  "task": "addvoldb"
+   "__EXEC_TIME" : "229 ms",
+   "dbname" : "demodb",
+   "note" : "none",
+   "purpose" : "generic",
+   "status" : "success",
+   "task" : "addvoldb"
 }
 ```

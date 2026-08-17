@@ -61,10 +61,17 @@ The loaddb interface will load a database from files.
 
 ```
 {
-   "__EXEC_TIME" : "842 ms",
+   "__EXEC_TIME" : "3023 ms",
    "line" : [
-      "Total   1000 objects processed.",
-      ""
+      "",
+      "Start schema loading.",
+      "Total       48 statements executed.",
+      "Schema loading from /home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/test_loaddb_schema finished.",
+      "Statistics for Catalog classes have been updated.",
+      "",
+      "",
+      "Start object loading.",
+      "Total 19202 object(s) inserted, 0 object(s) failed."
    ],
    "note" : "none",
    "status" : "success",

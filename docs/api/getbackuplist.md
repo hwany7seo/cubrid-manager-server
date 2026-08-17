@@ -34,8 +34,8 @@ Get backup list.
 
 ```
 {
-   "__EXEC_TIME" : "3 ms",
-   "level0" : "/home/cubrid/CUBRID/databases/demodb/backup/demodb_bk0v000",
+   "__EXEC_TIME" : "0 ms",
+   "level0" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/backup/alatestdb_backup_lv0/alatestdb_bk0v000",
    "level1" : "none",
    "level2" : "none",
    "note" : "none",

@@ -36,25 +36,8 @@ The keys of an auto-backup plan are the ones described in [addbackupinfo](addbac
 
 ```
 {
-   "__EXEC_TIME" : "3 ms",
-   "dbname" : "demodb",
-   "demodb" : [
-      {
-         "archivedel" : "OFF",
-         "backupid" : "backup1",
-         "check" : "y",
-         "level" : "0",
-         "mt" : "2",
-         "onoff" : "ON",
-         "path" : "/home/cubrid/CUBRID/databases/demodb/backup",
-         "period_date" : "1",
-         "period_type" : "Monthly",
-         "storeold" : "ON",
-         "time" : "03:00",
-         "updatestatus" : "ON",
-         "zip" : "y"
-      }
-   ],
+   "__EXEC_TIME" : "0 ms",
+   "dbname" : "alatestdb",
    "note" : "none",
    "status" : "success",
    "task" : "getbackupinfo"

@@ -41,7 +41,7 @@ Add a trigger.
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| status | execution result, success or failed. |
+| status | execution result, success or failed. Not the trigger status of the request, which happens to share the key name |
 | note | if failed, a brief description will be given here |
 | dbname | database name |
 
@@ -49,7 +49,8 @@ Add a trigger.
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
+   "__EXEC_TIME" : "47 ms",
+   "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "addtrigger"

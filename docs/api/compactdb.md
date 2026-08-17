@@ -43,13 +43,10 @@ log is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "320 ms",
+   "__EXEC_TIME" : "728 ms",
    "log" : [
       {
-         "line" : "Classes to process: 12"
-      },
-      {
-         "line" : "Compacting class 'code'..."
+         "line" : [ "", "Pass 1", "" ]
       }
    ],
    "note" : "none",
@@ -57,3 +54,5 @@ log is composed of objects with following structure
    "task" : "compactdb"
 }
 ```
+
+> Lists are shortened to 3 entries here; the real response returned up to 234.

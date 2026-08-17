@@ -26,11 +26,12 @@ Get broker status.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
-| broker | the list of the requested brokers and of their monitoring data |
+| cas_mon | the list of the requested brokers and of their monitoring data |
+| time | the moment the data was collected, `YYYY/MM/DD HH:MM:SS` |
 
-### broker
+### cas_mon
 
-broker is composed of objects with following structure
+cas_mon is composed of objects with following structure
 
 | **Key** | **Description** |
 | --- | --- |
@@ -49,10 +50,9 @@ broker is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "11 ms",
-   "broker" : [
+   "__EXEC_TIME" : "2 ms",
+   "cas_mon" : [
       {
-         "bname" : "query_editor",
          "cas_mon_act_session" : "0",
          "cas_mon_active" : "0",
          "cas_mon_error_query" : "0",
@@ -66,6 +66,7 @@ broker is composed of objects with following structure
    ],
    "note" : "none",
    "status" : "success",
-   "task" : "getbrokerdiagdata"
+   "task" : "getbrokerdiagdata",
+   "time" : "2026/08/18 07:41:10"
 }
 ```

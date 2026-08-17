@@ -36,8 +36,7 @@ any `noexist` key.
 
 ```
 {
-   "__EXEC_TIME" : "1 ms",
-   "noexist" : "/home/cubrid/CUBRID/databases_bak",
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "checkdir"

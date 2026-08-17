@@ -38,67 +38,44 @@ Get CM/CWM user information
 
 ## Response Sample
 
-```json
+```
 {
-   "dblist" : 
+   "dblist" : [
       {
          "dbs" : [
             {
                "dbname" : "demodb"
             }
+         ]
       }
    ],
    "note" : "none",
    "status" : "success",
-   "task" : "adddbmtuser_new",
-   "userlist" : 
+   "task" : "getdbmtuserinfo_new",
+   "userlist" : [
       {
          "user" : [
             {
                "@id" : "admin",
-               "authority_list" : null,
-               "dbauth" : 
+               "authority_list" : [ null ],
+               "dbauth" : [
                   {
                      "auth_info" : [
                         {
                            "@dbid" : "dba",
-                           "dbbrokeraddress" : "10.34.135.62,30000",
+                           "dbbrokeraddress" : "localhost,33000",
                            "dbname" : "demodb"
                         }
-                  ]
-               },
-               "user_auth" : "admin"
-            },
-            {
-               "@id" : "hqy_admin225",
-               "authority_list" : 
-                  {
-                     "brk" : "yes",
-                     "dbc" : "no",
-                     "dbo" : "yes",
-                     "job" : "no",
-                     "mon" : "no",
-                     "var" : "no"
+                     ]
                   }
-               ,
-               "dbauth" : 
-                  {
-                     "auth_info" : [
-                        {
-                           "@dbid" : "dba",
-                           "dbbrokeraddress" : "localhost, 33000",
-                           "dbname" : "db_3"
-                        },
-                        {
-                           "@dbid" : "dba",
-                           "dbbrokeraddress" : "localhost, 33000",
-                           "dbname" : "db_5"
-                        }
-                  ]
-               },
-               "user_auth" : "6"
+               ],
+               "user_auth" : "admin"
             }
          ]
       }
+   ]
 }
 ```
+
+This task is served by the extended interface, which does not add `__EXEC_TIME`
+to the answer.

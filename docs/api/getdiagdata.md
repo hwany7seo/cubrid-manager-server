@@ -84,32 +84,16 @@ Get monitoring data.
 
 ```
 {
-   "__EXEC_TIME" : "13 ms",
+   "__EXEC_TIME" : "1 ms",
    "cas_mon" : [
       {
-         "cas_mon_act_session" : "0",
+         "cas_mon_act_session" : "1",
          "cas_mon_error_query" : "0",
          "cas_mon_long_query" : "0",
          "cas_mon_long_tran" : "0",
          "cas_mon_query" : "0",
          "cas_mon_req" : "0",
          "cas_mon_tran" : "0"
-      }
-   ],
-   "db_mon" : [
-      {
-         "mon_cub_buffer_page_read" : "1024",
-         "mon_cub_buffer_page_write" : "128",
-         "mon_cub_conn_aborted_clients" : "0",
-         "mon_cub_conn_cli_request" : "42",
-         "mon_cub_conn_conn_reject" : "0",
-         "mon_cub_conn_conn_req" : "4",
-         "mon_cub_lock_deadlock" : "0",
-         "mon_cub_lock_request" : "18",
-         "mon_cub_query_full_scan" : "2",
-         "mon_cub_query_open_page" : "36",
-         "mon_cub_query_opened_page" : "36",
-         "mon_cub_query_slow_query" : "0"
       }
    ],
    "note" : "none",

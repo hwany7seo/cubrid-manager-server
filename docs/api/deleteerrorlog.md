@@ -33,11 +33,13 @@ Use [removelog](removelog.md) to delete the error log files instead.
 
 ## Response Sample
 
+Because the task is not registered, the server rejects it. There is no
+`__EXEC_TIME` in the answer, the request never reaches a handler.
+
 ```
 {
-   "__EXEC_TIME" : "72 ms",
-   "note" : "none",
-   "status" : "success",
+   "note" : "Undefined request - deleteerrorlog",
+   "status" : "failure",
    "task" : "deleteerrorlog"
 }
 ```

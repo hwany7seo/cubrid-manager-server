@@ -34,10 +34,10 @@ Get the total number of the lines of a file. It is normally used together with
 
 ```
 {
-   "__EXEC_TIME" : "6 ms",
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getfiletotallinenum",
-   "totalnum" : "273"
+   "totalnum" : "21"
 }
 ```

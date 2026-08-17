@@ -36,12 +36,7 @@ Get the top result from a CAS log analysis file.
 
 ```
 {
-   "__EXEC_TIME" : "6 ms",
-   "logstringlist" : [
-      {
-         "logstring" : "select * from code"
-      }
-   ],
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getcaslogtopresult"

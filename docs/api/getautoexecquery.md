@@ -45,18 +45,18 @@ planlist is composed of `queryplan` objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "3 ms",
-   "dbname" : "demodb",
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "planlist" : [
       {
+         "dbname" : "alatestdb",
          "queryplan" : [
             {
-               "detail" : "03:00",
-               "period" : "EVERYDAY",
-               "query_id" : "query1",
-               "query_string" : "select count(*) from code",
-               "username" : "dba"
+               "@username" : "dba",
+               "detail" : "2026/08/18 07:41",
+               "period" : "ONE",
+               "query_id" : "bbaa",
+               "query_string" : "select * from db_class;"
             }
          ]
       }

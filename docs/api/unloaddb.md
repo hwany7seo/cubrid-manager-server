@@ -70,13 +70,11 @@ The same information is returned later by [unloadinfo](unloadinfo.md).
 
 ```
 {
-   "__EXEC_TIME" : "1284 ms",
+   "__EXEC_TIME" : "99 ms",
    "note" : "none",
    "result" : [
       {
-         "index" : "/home/cubrid/CUBRID/databases/demodb_indexes",
-         "object" : "/home/cubrid/CUBRID/databases/demodb_objects",
-         "schema" : "/home/cubrid/CUBRID/databases/demodb_schema"
+         "public.code" : "6 (100%/100%)"
       }
    ],
    "status" : "success",

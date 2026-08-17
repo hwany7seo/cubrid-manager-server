@@ -80,102 +80,48 @@ spaceinfo is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "37 ms",
+   "__EXEC_TIME" : "53 ms",
    "dbinfo" : [
       {
-         "free_size" : "27904",
+         "free_size" : "15616",
          "purpose" : "PERMANENT",
-         "total_size" : "32768",
+         "total_size" : "20480",
          "type" : "PERMANENT",
          "used_size" : "4864",
-         "volume_count" : "1"
-      },
-      {
-         "free_size" : "0",
-         "purpose" : "TEMPORARY",
-         "total_size" : "0",
-         "type" : "PERMANENT",
-         "used_size" : "0",
-         "volume_count" : "0"
-      },
-      {
-         "free_size" : "0",
-         "purpose" : "TEMPORARY",
-         "total_size" : "0",
-         "type" : "TEMPORARY",
-         "used_size" : "0",
-         "volume_count" : "0"
+         "volume_count" : "3"
       }
    ],
-   "dbname" : "ha_test",
+   "dbname" : "alatestdb",
    "fileinfo" : [
       {
          "data_type" : "INDEX",
-         "file_count" : "28",
-         "file_table_size" : "28",
-         "reserved_size" : "1732",
-         "total_size" : "1792",
-         "used_size" : "32"
-      },
-      {
-         "data_type" : "HEAP",
-         "file_count" : "39",
-         "file_table_size" : "39",
-         "reserved_size" : "2396",
-         "total_size" : "2496",
-         "used_size" : "61"
-      },
-      {
-         "data_type" : "SYSTEM",
-         "file_count" : "8",
-         "file_table_size" : "8",
-         "reserved_size" : "473",
-         "total_size" : "512",
-         "used_size" : "31"
-      },
-      {
-         "data_type" : "TEMP",
-         "file_count" : "0",
-         "file_table_size" : "0",
-         "reserved_size" : "0",
-         "total_size" : "0",
-         "used_size" : "0"
+         "file_count" : "30",
+         "file_table_size" : "30",
+         "reserved_size" : "1828",
+         "total_size" : "1920",
+         "used_size" : "62"
       }
    ],
-   "freespace" : "2471028",
-   "logpagesize" : "16384",
+   "freespace" : "446132",
+   "logpagesize" : "4096",
    "note" : "none",
-   "pagesize" : "16384",
+   "pagesize" : "4096",
    "spaceinfo" : [
       {
-         "date" : "20250630",
-         "freepage" : "27904",
-         "location" : "/home/cubrid/HA_TEST/ha_test",
+         "date" : "20260818",
+         "freepage" : "7552",
+         "location" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/alatestdb",
          "purpose" : "PERMANENT",
-         "spacename" : "/home/cubrid/HA_TEST/ha_test",
-         "totalpage" : "32768",
+         "spacename" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/alatestdb",
+         "totalpage" : "12288",
          "type" : "PERMANENT",
-         "usedpage" : "4864",
+         "usedpage" : "4736",
          "volid" : "0"
-      },
-      {
-         "date" : "20250630",
-         "freepage" : " ",
-         "location" : "/home/cubrid/HA_TEST",
-         "spacename" : "ha_test_lgat",
-         "totalpage" : "32768",
-         "type" : "Active_log"
-      },
-      {
-         "date" : "20250630",
-         "freepage" : " ",
-         "location" : "/home/cubrid/HA_TEST",
-         "spacename" : "ha_test_lgar_t",
-         "totalpage" : "32768",
-         "type" : "Archive_log"
       }
    ],
    "status" : "success",
    "task" : "dbspaceinfo"
 }
 ```
+
+> Lists are shortened to 1 entry here; the real response returned up to 5.

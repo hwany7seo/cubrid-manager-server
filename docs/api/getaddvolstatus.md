@@ -33,11 +33,11 @@ Get volume status.
 
 ```
 {
-   "__EXEC_TIME" : "2 ms",
-   "freespace" : "51234",
+   "__EXEC_TIME" : "1 ms",
+   "freespace" : "450720",
    "note" : "none",
    "status" : "success",
    "task" : "getaddvolstatus",
-   "volpath" : "/home/cubrid/CUBRID/databases/demodb"
+   "volpath" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb"
 }
 ```

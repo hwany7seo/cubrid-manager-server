@@ -44,30 +44,32 @@ activelist is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
-   "activelist" : 
+   "__EXEC_TIME" : "22 ms",
+   "activelist" : [
       {
          "active" : [
             {
-               "dbname" : "testdb"
+               "dbname" : "demodb"
             }
+         ]
       }
    ],
-   "dblist" : 
+   "dblist" : [
       {
          "dbs" : [
             {
-               "dbdir" : "/home/huangqiyu/cubrid_8.4.3/databases/testdb3",
-               "dbname" : "testdb3"
+               "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/destinationdb",
+               "dbname" : "destinationdb"
             },
             {
-               "dbdir" : "/home/huangqiyu/cubrid_8.4.3/databases/testdb2",
-               "dbname" : "testdb2"
+               "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb",
+               "dbname" : "alatestdb"
             },
             {
-               "dbdir" : "/home/huangqiyu/cubrid_8.4.3/databases/testdb",
-               "dbname" : "testdb"
+               "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb",
+               "dbname" : "demodb"
             }
+         ]
       }
    ],
    "note" : "none",

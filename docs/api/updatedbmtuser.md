@@ -99,19 +99,13 @@ auth_info is composed of objects with following structure
 ## Response Sample
 
 ```
- {
-   "__EXEC_TIME" : "1 ms",
+{
+   "__EXEC_TIME" : "2 ms",
    "dblist" : [
       {
          "dbs" : [
             {
-               "dbname" : "jdbcdb"
-            },
-            {
-               "dbname" : "ctldb"
-            },
-            {
-               "dbname" : "ha_test"
+               "dbname" : "demodb"
             }
          ]
       }
@@ -130,18 +124,8 @@ auth_info is composed of objects with following structure
                      "auth_info" : [
                         {
                            "@dbid" : "dba",
-                           "dbbrokeraddress" : "192.168.2.36,30000",
-                           "dbname" : "jdbcdb"
-                        },
-                        {
-                           "@dbid" : "dba",
-                           "dbbrokeraddress" : "192.168.2.36,30000",
-                           "dbname" : "ctldb"
-                        },
-                        {
-                           "@dbid" : "dba",
-                           "dbbrokeraddress" : "192.168.2.36,33120",
-                           "dbname" : "ha_test"
+                           "dbbrokeraddress" : "localhost,33000",
+                           "dbname" : "demodb"
                         }
                      ]
                   }
@@ -153,5 +137,4 @@ auth_info is composed of objects with following structure
       }
    ]
 }
-
 ```

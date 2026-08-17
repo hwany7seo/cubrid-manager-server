@@ -35,8 +35,8 @@ returned with an empty value.
 
 ```
 {
-   "CUBRID" : "/home/cubrid/CUBRID",
-   "__EXEC_TIME" : "1 ms",
+   "CUBRID" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64",
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getenvvarbyname"

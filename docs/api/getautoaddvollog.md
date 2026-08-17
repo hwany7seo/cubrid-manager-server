@@ -47,17 +47,7 @@ log is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "5 ms",
-   "log" : [
-      {
-         "dbname" : "demodb",
-         "outcome" : "success",
-         "page" : "200",
-         "purpose" : "data",
-         "time" : "2026-08-11 10:22:31",
-         "volname" : "demodb_data_x001"
-      }
-   ],
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getautoaddvollog"

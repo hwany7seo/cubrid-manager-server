@@ -45,20 +45,42 @@ accesslog and errorlog are composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "9 ms",
+   "__EXEC_TIME" : "51 ms",
    "accesslog" : [
       {
-         "taskname" : "startinfo",
-         "time" : "2026.08.11 10:22:31",
-         "user" : "admin"
+         "@user" : "admin",
+         "taskname" : "login",
+         "time" : "20260814 12:47:15"
+      },
+      {
+         "@user" : "-",
+         "taskname" : "-",
+         "time" : "20260814 12:47:15"
+      },
+      {
+         "@user" : "admin",
+         "taskname" : "login",
+         "time" : "20260814 12:47:15"
       }
    ],
    "errorlog" : [
       {
-         "errornote" : "Undefined request - foo",
-         "taskname" : "foo",
-         "time" : "2026.08.11 10:24:02",
-         "user" : "admin"
+         "@user" : "admin",
+         "errornote" : "Parameter(target id) missing in the request",
+         "taskname" : "updatedbmtuser",
+         "time" : "20260814 12:47:17"
+      },
+      {
+         "@user" : "admin",
+         "errornote" : "Invalid request format",
+         "taskname" : "updatedbmtuser",
+         "time" : "20260814 12:47:17"
+      },
+      {
+         "@user" : "-",
+         "errornote" : "Version-mismatched",
+         "taskname" : "login",
+         "time" : "20260814 12:47:17"
       }
    ],
    "note" : "none",
@@ -66,3 +88,5 @@ accesslog and errorlog are composed of objects with following structure
    "task" : "loadaccesslog"
 }
 ```
+
+> Lists are shortened to 3 entries here; the real response returned up to 2705.

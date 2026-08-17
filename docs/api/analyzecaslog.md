@@ -63,23 +63,10 @@ Otherwise (analysis by query):
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
+   "__EXEC_TIME" : "23 ms",
    "note" : "none",
-   "resultfile" : "/home/cubrid/CUBRID/tmp/analyzelog_res_1234",
-   "resultlist" : [
-      {
-         "result" : [
-            {
-               "avg" : "0.003",
-               "cnt" : "12",
-               "err" : "0",
-               "max" : "0.011",
-               "min" : "0.001",
-               "qindex" : "[Q1]"
-            }
-         ]
-      }
-   ],
+   "resultfile" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/analyzelog_res_141_1787006473_176380_129",
+   "resultlist" : null,
    "status" : "success",
    "task" : "analyzecaslog"
 }

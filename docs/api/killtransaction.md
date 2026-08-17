@@ -68,27 +68,11 @@ other letters should cause an error. 
 
 ```
 {
-   "__EXEC_TIME" : "35 ms",
+   "__EXEC_TIME" : "1102 ms",
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "killtransaction",
-   "transactioninfo" : [
-      {
-         "transaction" : [
-            {
-               "@user" : "DBA",
-               "host" : "cubrid-host",
-               "SQL_ID" : "82353eb5cc51f",
-               "SQL_Text" : "select * from code",
-               "pid" : "6632",
-               "program" : "query_editor_cub_cas_1",
-               "query_time" : "0.40",
-               "tran_time" : "0.40",
-               "tranindex" : "1(ACTIVE)"
-            }
-         ]
-      }
-   ]
+   "transactioninfo" : null
 }
 ```

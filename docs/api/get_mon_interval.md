@@ -31,9 +31,9 @@ Get the monitoring statistic interval.
 
 ```
 {
-  "task": "get_mon_interval",
-  "interval": 60,
-  "status": "success",
-  "note": "none"
+   "interval" : 60,
+   "note" : "none",
+   "status" : "success",
+   "task" : "get_mon_interval"
 }
 ```

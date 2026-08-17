@@ -42,15 +42,15 @@ disk_info is composed of objects with following structure
 
 ```
 {
-  "task": "getsysdiskinfo",
-  "disk_info": [
-    {
-      "name": "/",
-      "total_size": "107321753600",
-      "free_size": "54638895104"
-    }
-  ],
-  "status": "success",
-  "note": "none"
+   "disk_info" : [
+      {
+         "free_size" : "467935289344",
+         "name" : "/",
+         "total_size" : "1832296755200"
+      }
+   ],
+   "note" : "none",
+   "status" : "success",
+   "task" : "getsysdiskinfo"
 }
 ```

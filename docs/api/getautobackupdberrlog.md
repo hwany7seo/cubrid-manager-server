@@ -45,15 +45,7 @@ error is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "4 ms",
-   "error" : [
-      {
-         "backupid" : "backup1",
-         "dbname" : "demodb",
-         "error_desc" : "Backup failed. Not enough space.",
-         "error_time" : "2026-08-11 03:00:02"
-      }
-   ],
+   "__EXEC_TIME" : "0 ms",
    "note" : "none",
    "status" : "success",
    "task" : "getautobackupdberrlog"

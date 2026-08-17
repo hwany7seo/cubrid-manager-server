@@ -82,59 +82,43 @@ dbauth is composed of objects with following structure
 
 ```json
 {
-    "dblist": {
-        "dbs": [
+   "__EXEC_TIME" : "4 ms",
+   "dblist" : [
+      {
+         "dbs" : [
             {
-                "dbname": "demodb"
+               "dbname" : "demodb"
             }
-        ]
-    },
-    "note": "none",
-    "status": "success",
-    "task": "adddbmtuser",
-    "userlist": {
-        "user": [
+         ]
+      }
+   ],
+   "note" : "none",
+   "status" : "success",
+   "task" : "adddbmtuser",
+   "userlist" : [
+      {
+         "user" : [
             {
-                "@id": "admin",
-                "authority_list": null,
-                "dbauth": {
-                    "auth_info": [
+               "@id" : "admin",
+               "casauth" : "admin",
+               "dbauth" : [
+                  {
+                     "auth_info" : [
                         {
-                            "@dbid": "dba",
-                            "dbbrokeraddress": "10.34.135.62,30000",
-                            "dbname": "demodb"
+                           "@dbid" : "dba",
+                           "dbbrokeraddress" : "localhost,33000",
+                           "dbname" : "demodb"
                         }
-                    ]
-                },
-                "user_auth": "admin"
-            },
-            {
-                "@id": "hqy_admin225",
-                "authority_list": {
-                    "brk": "yes",
-                    "dbc": "no",
-                    "dbo": "yes",
-                    "job": "no",
-                    "mon": "no",
-                    "var": "no"
-                },
-                "dbauth": {
-                    "auth_info": [
-                        {
-                            "@dbid": "dba",
-                            "dbbrokeraddress": "localhost, 33000",
-                            "dbname": "db_3"
-                        },
-                        {
-                            "@dbid": "dba",
-                            "dbbrokeraddress": "localhost, 33000",
-                            "dbname": "db_5"
-                        }
-                    ]
-                },
-                "user_auth": "6"
+                     ]
+                  }
+               ],
+               "dbcreate" : "admin",
+               "statusmonitorauth" : "admin"
             }
-        ]
-    }
+         ]
+      }
+   ]
 }
 ```
+
+> Lists are shortened to 1 entry here; the real response returned up to 2.

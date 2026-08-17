@@ -38,13 +38,13 @@ When `pid` is omitted, the statistics of the CMS process itself are returned.
 
 ```
 {
-  "task": "getprocstat",
-  "pid": 24513,
-  "cpu_kernel": 132,
-  "cpu_user": 481,
-  "mem_physical": 53483520,
-  "mem_virtual": 271314944,
-  "status": "success",
-  "note": "none"
+   "cpu_kernel" : 4,
+   "cpu_user" : 3,
+   "mem_physical" : 13299712,
+   "mem_virtual" : 613793792,
+   "note" : "none",
+   "pid" : 1873795,
+   "status" : "success",
+   "task" : "getprocstat"
 }
 ```

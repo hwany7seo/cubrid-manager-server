@@ -44,16 +44,16 @@ Returns insert_counter, update_counter, delete_counter, commit_counter, fail_cou
 
 ```
 {
-   "__EXEC_TIME" : "26 ms",
-   "commit_counter" : "1024",
+   "__EXEC_TIME" : "48 ms",
+   "commit_counter" : "0",
    "dbname" : "demodb",
    "delay_time" : "0",
-   "delete_counter" : "12",
+   "delete_counter" : "0",
    "fail_counter" : "0",
-   "insert_counter" : "512",
+   "insert_counter" : "0",
    "note" : "none",
    "status" : "success",
    "task" : "getstandbyserverstat",
-   "update_counter" : "48"
+   "update_counter" : "0"
 }
 ```

@@ -59,12 +59,11 @@ given as a structured authority list.
 
 ```
 {
-   "__EXEC_TIME" : "5 ms",
+   "__EXEC_TIME" : "0 ms",
    "dblist" : [
       {
          "dbs" : [
             {
-               "dbdir" : "/home/cubrid/CUBRID/databases/demodb",
                "dbname" : "demodb"
             }
          ]
@@ -78,13 +77,14 @@ given as a structured authority list.
          "user" : [
             {
                "@id" : "admin",
+               "@passwd" : "admin",
                "casauth" : "admin",
                "dbauth" : [
                   {
                      "auth_info" : [
                         {
                            "@dbid" : "dba",
-                           "dbbrokeraddress" : "localhost,30000",
+                           "dbbrokeraddress" : "localhost,33000",
                            "dbname" : "demodb"
                         }
                      ]

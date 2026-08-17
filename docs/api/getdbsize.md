@@ -33,8 +33,8 @@ Get database size information.
 
 ```
 {
-   "__EXEC_TIME" : "17 ms",
-   "dbsize" : "112",
+   "__EXEC_TIME" : "49 ms",
+   "dbsize" : "150999328",
    "note" : "none",
    "status" : "success",
    "task" : "getdbsize"

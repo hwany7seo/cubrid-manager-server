@@ -38,9 +38,9 @@ When `log_level` is omitted, INFO is used.
 
 ```
 {
-  "task": "setloglevel",
-  "log_level": 3,
-  "status": "success",
-  "note": "none"
+   "log_level" : 4,
+   "note" : "none",
+   "status" : "success",
+   "task" : "setloglevel"
 }
 ```

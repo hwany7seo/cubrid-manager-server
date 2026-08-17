@@ -38,49 +38,54 @@ Get database user information in CUBRID.
 
 ```
 {
-   "__EXEC_TIME" : "359 ms",
-   "dbname" : "testdb",
+   "__EXEC_TIME" : "34 ms",
+   "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "userinfo",
-   "user" : 
+   "user" : [
       {
-         "@id" : "163810704",
-         "@name" : "PUBLIC",
+         "@id" : "",
+         "@name" : "INFORMATION_SCHEMA",
          "authorization" : [
             {
-               "db_attr_setdomain_elm" : "1",
-               "db_attribute" : "1",
-               "db_auth" : "1",
-               "db_authorization" : "65",
-               "db_authorizations" : "65",
-               "db_class" : "1",
-               "db_direct_super_class" : "1",
-               "db_ha_apply_info" : "1",
-               "db_index" : "1",
-               "db_index_key" : "1",
-               "db_meth_arg" : "1",
-               "db_meth_arg_setdomain_elm" : "1",
-               "db_meth_file" : "1",
-               "db_method" : "1",
-               "db_partition" : "1",
-               "db_root" : "65",
-               "db_serial" : "1",
-               "db_stored_procedure" : "1",
-               "db_stored_procedure_args" : "1",
-               "db_trig" : "1",
-               "db_user" : "65",
-               "db_vclass" : "1"
+               "_db_attribute" : "1",
+               "_db_auth" : "1",
+               "_db_authorization" : "1",
+               "_db_charset" : "1",
+               "_db_class" : "1",
+               "_db_collation" : "1",
+               "_db_data_type" : "1",
+               "_db_domain" : "1",
+               "_db_ha_apply_info" : "1",
+               "_db_index" : "1",
+               "_db_index_key" : "1",
+               "_db_meth_arg" : "1",
+               "_db_meth_file" : "1",
+               "_db_meth_sig" : "1",
+               "_db_method" : "1",
+               "_db_partition" : "1",
+               "_db_query_spec" : "1",
+               "_db_serial" : "1",
+               "_db_server" : "1",
+               "_db_stored_procedure" : "1",
+               "_db_stored_procedure_args" : "1",
+               "_db_stored_procedure_code" : "1",
+               "_db_synonym" : "1",
+               "_db_trigger" : "1",
+               "_db_user" : "1",
+               "db_root" : "1",
+               "dual" : "1"
             }
-         ,
-         "groups" : null
-      },
-      {
-         "@id" : "163810984",
-         "@name" : "DBA",
-         "authorization" : null,
-         "groups" : null
+         ],
+         "groups" : [
+            {
+               "group" : [ "PUBLIC" ]
+            }
+         ]
       }
    ]
 }
 ```
+
+> Lists are shortened to 1 entry here; the real response returned up to 3.

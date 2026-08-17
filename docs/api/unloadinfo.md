@@ -49,13 +49,12 @@ database is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "3 ms",
+   "__EXEC_TIME" : "0 ms",
    "database" : [
       {
          "dbname" : "demodb",
-         "index" : "/home/cubrid/CUBRID/databases/demodb_index;2026.08.11 10:22",
-         "object" : "/home/cubrid/CUBRID/databases/demodb_objects;2026.08.11 10:22",
-         "schema" : "/home/cubrid/CUBRID/databases/demodb_schema;2026.08.11 10:22"
+         "object" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_objects;2026.08.18 07:41",
+         "schema" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_schema;2026.08.18 07:41"
       }
    ],
    "note" : "none",

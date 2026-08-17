@@ -46,15 +46,31 @@ error is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "4 ms",
+   "__EXEC_TIME" : "1 ms",
    "error" : [
       {
-         "dbname" : "demodb",
-         "error_code" : "-493",
-         "error_desc" : "Syntax error.",
-         "error_time" : "2026-08-11 03:10:02",
-         "query_id" : "query1",
-         "username" : "dba"
+         "@username" : "admin",
+         "dbname" : "alatestdb",
+         "error_code" : "0",
+         "error_desc" : "start",
+         "error_time" : "2026/08/14 14:18:03",
+         "query_id" : "bbaa"
+      },
+      {
+         "@username" : "admin",
+         "dbname" : "alatestdb",
+         "error_code" : "0",
+         "error_desc" : "success",
+         "error_time" : "2026/08/14 14:18:04",
+         "query_id" : "bbaa"
+      },
+      {
+         "@username" : "admin",
+         "dbname" : "alatestdb",
+         "error_code" : "0",
+         "error_desc" : "start",
+         "error_time" : "2026/08/14 14:22:03",
+         "query_id" : "bbaa"
       }
    ],
    "note" : "none",
@@ -62,3 +78,5 @@ error is composed of objects with following structure
    "task" : "getautoexecqueryerrlog"
 }
 ```
+
+> Lists are shortened to 3 entries here; the real response returned up to 34.

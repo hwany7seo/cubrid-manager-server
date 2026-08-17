@@ -111,9 +111,9 @@ Get database statistics from a statdump utility.
 
 ```
 {
-   "__EXEC_TIME" : "42 ms",
+   "__EXEC_TIME" : "73 ms",
    "data_page_buffer_hit_ratio" : "0",
-   "dbname" : "ha_test",
+   "dbname" : "demodb",
    "note" : "none",
    "num_adaptive_flush_log_pages" : "0",
    "num_adaptive_flush_max_pages" : "0",
@@ -146,7 +146,7 @@ Get database statistics from a statdump utility.
    "num_log_page_ioreads" : "0",
    "num_log_page_iowrites" : "0",
    "num_log_wals" : "0",
-   "num_network_requests" : "53",
+   "num_network_requests" : "5",
    "num_object_locks_acquired" : "0",
    "num_object_locks_converted" : "0",
    "num_object_locks_re_requested" : "0",
@@ -191,7 +191,9 @@ Get database statistics from a statdump utility.
    "num_tran_start_topops" : "0",
    "status" : "success",
    "task" : "statdump",
-   "time" : "2025/06/30 12:17:45",
+   "time" : "2026/08/18 07:41:13",
    "time_ha_replication_delay" : "0"
 }
 ```
+
+> Lists are shortened to 1 entry here; the real response returned up to 0.

@@ -24,7 +24,8 @@ Get database process statistics.
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| status | execution result, success or failed. |
+| note | if failed, a brief description will be given here |
 | dbstat | information of database status |
 
 
@@ -45,14 +46,14 @@ dbstat is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "13 ms",
+   "__EXEC_TIME" : "35 ms",
    "dbstat" : [
       {
-         "cpu_kernel" : "165147",
-         "cpu_user" : "162071",
-         "dbname" : "ha_test",
-         "mem_physical" : "549388288",
-         "mem_virtual" : "2784587776"
+         "cpu_kernel" : "52",
+         "cpu_user" : "35",
+         "dbname" : "demodb",
+         "mem_physical" : "523157504",
+         "mem_virtual" : "5775118336"
       }
    ],
    "note" : "none",

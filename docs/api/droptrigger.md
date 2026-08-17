@@ -35,7 +35,8 @@ Drop a trigger.
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
+   "__EXEC_TIME" : "40 ms",
+   "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "droptrigger"

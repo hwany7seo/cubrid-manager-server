@@ -67,53 +67,55 @@ jobinfo is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME": "2 ms",
-   "asinfo": [
+   "__EXEC_TIME" : "2 ms",
+   "asinfo" : [
       {
-         "as_c": "0",
-         "as_client_ip": "0.0.0.0",
-         "as_cpu": "0.00",
-         "as_ctime": "0:00",
-         "as_cur": "",
-         "as_dbhost": "",
-         "as_dbname": "",
-         "as_error_query": "0",
-         "as_id": "1",
-         "as_lat": "2026/08/11 13:30:57",
-         "as_lct": "",
-         "as_long_query": "0",
-         "as_long_tran": "0",
-         "as_num_query": "0",
-         "as_num_tran": "0",
-         "as_pid": "0",
-         "as_psize": "-1",
-         "as_status": "CLIENT WAIT"
+         "as_c" : "0",
+         "as_client_ip" : "0.0.0.0",
+         "as_cpu" : "0.00",
+         "as_ctime" : "0:00",
+         "as_cur" : "",
+         "as_dbhost" : "",
+         "as_dbname" : "",
+         "as_error_query" : "0",
+         "as_id" : "1",
+         "as_lat" : "2026/08/18 07:41:09",
+         "as_lct" : "",
+         "as_long_query" : "0",
+         "as_long_tran" : "0",
+         "as_num_query" : "0",
+         "as_num_tran" : "0",
+         "as_pid" : "1875078",
+         "as_psize" : "6412",
+         "as_status" : "IDLE"
       },
       {
-         "as_c": "0",
-         "as_client_ip": "0.0.0.0",
-         "as_cpu": "0.00",
-         "as_ctime": "0:00",
-         "as_cur": "",
-         "as_dbhost": "",
-         "as_dbname": "",
-         "as_error_query": "0",
-         "as_id": "2",
-         "as_lat": "2026/08/11 13:30:57",
-         "as_lct": "",
-         "as_long_query": "0",
-         "as_long_tran": "0",
-         "as_num_query": "0",
-         "as_num_tran": "0",
-         "as_pid": "271739",
-         "as_psize": "7032",
-         "as_status": "IDLE"
+         "as_c" : "0",
+         "as_client_ip" : "0.0.0.0",
+         "as_cpu" : "0.00",
+         "as_ctime" : "0:00",
+         "as_cur" : "",
+         "as_dbhost" : "",
+         "as_dbname" : "",
+         "as_error_query" : "0",
+         "as_id" : "2",
+         "as_lat" : "2026/08/18 07:41:09",
+         "as_lct" : "",
+         "as_long_query" : "0",
+         "as_long_tran" : "0",
+         "as_num_query" : "0",
+         "as_num_tran" : "0",
+         "as_pid" : "1875079",
+         "as_psize" : "6412",
+         "as_status" : "IDLE"
       }
    ],
-   "bname": "query_editor",
-   "note": "none",
-   "status": "success",
-   "task": "getbrokerstatus",
-   "time": "2026/08/13 12:03:52"
+   "bname" : "query_editor",
+   "note" : "none",
+   "status" : "success",
+   "task" : "getbrokerstatus",
+   "time" : "2026/08/18 07:41:10"
 }
 ```
+
+> Lists are shortened to 2 entries here; the real response returned up to 5.

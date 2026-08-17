@@ -27,11 +27,13 @@ Get trigger information.
 | task | task name |
 | status | execution result, success or failed. |
 | note | if failed, a brief description will be given here |
-| triggerinfo | the list of the triggers of the database |
+| dbname | database name |
+| triggerlist | the list of the triggers of the database, or null when it has none |
 
-### triggerinfo
+### triggerlist
 
-triggerinfo is composed of `trigger` objects whose keys are the ones of
+triggerlist holds one entry with a `triggerinfo` array; triggerinfo is composed
+of `trigger` objects whose keys are the ones of
 [addtrigger](addtrigger.md): name, conditiontime, eventtype, eventtarget, condition, action,
 status and priority.
 
@@ -39,22 +41,25 @@ status and priority.
 
 ```
 {
-   "__EXEC_TIME" : "42 ms",
+   "__EXEC_TIME" : "34 ms",
+   "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "gettriggerinfo",
-   "triggerinfo" : [
+   "triggerlist" : [
       {
-         "trigger" : [
+         "triggerinfo" : [
             {
                "action" : "REJECT",
+               "actiontime" : "BEFORE",
                "condition" : "1=1",
                "conditiontime" : "BEFORE",
-               "eventtarget" : "history(score)",
                "eventtype" : "STATEMENT UPDATE",
-               "name" : "example",
-               "priority" : "0.00",
-               "status" : "ACTIVE"
+               "name" : "dba.example",
+               "priority" : "0.00000",
+               "status" : "INACTIVE",
+               "target_att" : "score",
+               "target_class" : "public.history"
             }
          ]
       }

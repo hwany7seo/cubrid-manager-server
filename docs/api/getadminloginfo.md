@@ -46,10 +46,10 @@ Get admin login logs.
    "__EXEC_TIME" : "0 ms",
    "adminloginfo" : [
       {
-         "lastupdate" : "2025.06.30",
+         "lastupdate" : "2026.08.18",
          "owner" : "cubrid",
-         "path" : "/home/cubrid/CUBRID-11.4.0.1781-6b2bc75-Linux.x86_64/log/broker/cubrid_broker.log",
-         "size" : "1395"
+         "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/cubrid_broker.log",
+         "size" : "208"
       }
    ],
    "note" : "none",

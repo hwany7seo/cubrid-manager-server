@@ -62,21 +62,37 @@ objects which the `cubrid lockdb` utility reports.
 
 ```
 {
-   "__EXEC_TIME" : "63 ms",
+   "__EXEC_TIME" : "59 ms",
    "lockinfo" : [
       {
-         "esc" : "10",
-         "dinterval" : "1000",
-         "maxnumlock" : "2000",
+         "dinterval" : "1.00",
+         "esc" : "100000",
+         "lot" : [
+            {
+               "maxnumlock" : "-1",
+               "numallocated" : "1000",
+               "numlocked" : "0",
+               "sizelock" : "242K"
+            }
+         ],
          "transaction" : [
             {
-               "granted_mode" : "X_LOCK",
-               "host" : "node1",
-               "isolevel" : "READ COMMITTED",
-               "pid" : "18510",
-               "pname" : "csql",
-               "timeout" : "-1",
-               "tran_index" : "1"
+               "@uid" : "",
+               "host" : "",
+               "index" : "0",
+               "isolevel" : "COMMITTED READ",
+               "pid" : "0",
+               "pname" : "",
+               "timeout" : ":"
+            },
+            {
+               "@uid" : "DBA",
+               "host" : "ai-work-49",
+               "index" : "1",
+               "isolevel" : "COMMITTED READ",
+               "pid" : "1874583",
+               "pname" : "lockdb",
+               "timeout" : ":"
             }
          ]
       }

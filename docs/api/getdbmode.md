@@ -43,12 +43,12 @@ dbserver is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "14 ms",
+   "__EXEC_TIME" : "27 ms",
    "dbserver" : [
       {
          "dbname" : "demodb",
-         "server_mode" : "active",
-         "server_msg" : ""
+         "server_mode" : "CS-mode",
+         "server_msg" : "none"
       }
    ],
    "note" : "none",
