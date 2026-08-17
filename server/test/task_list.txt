@@ -105,7 +105,9 @@ removestatustemplate
 // value of each case carries the ';' (action / status+priority / triggername).
 addtrigger
 altertrigger
-//gettriggerinfo
+// gettriggerinfo has to run while the trigger exists; after droptrigger it
+// only ever answers "triggerlist": null.
+gettriggerinfo
 droptrigger
 
 getautoaddvol
@@ -133,6 +135,11 @@ renamedb_erropen,failure
 // renamedb renames destinationdb to anotherdb, so drop anotherdb afterwards.
 renamedb
 deletedb_for_renamedb
+// advanced mode maps every permanent volume by hand, so it runs against a
+// database of its own whose volume set is known: <db> and <db>_x001.
+createdb_for_renameadv
+renamedb_advanced
+deletedb_for_renameadv
 unloaddb
 unloaddb_nullname,failure
 unloaddb_nulltarget,failure
@@ -161,7 +168,7 @@ executecasrunner
 /* db api related tasks */
 class
 classinfo
-gettriggerinfo
+// gettriggerinfo moved up next to addtrigger, see above
 // optimizedb  # removed: duplicate of the earlier optimizedb; alatestdb is already deleted here
 updateattribute
 userinfo

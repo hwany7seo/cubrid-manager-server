@@ -1,22 +1,29 @@
 #! /usr/bin/env python3
+import atexit
 import datetime
 import json
 import os
 import re
 import shutil
+import signal
 import ssl
+import subprocess
 import sys
+import time
 from getpass import getpass
 
 DEFAULT_PORT = 8001
 TEST_CASE_DIR = "task_test_case_json/"
 TEST_CONFIG_DIR = "task_test_config/"
+# Where start_kill_targets() records the processes it spawned, so that a run
+# killed before clean_env() can be cleaned up by the next one.
+HELPER_PID_FILE = "log/helper_pids"
 
 # Every database the task list creates. They are removed before and after a run
 # so that a half finished run does not break the next one. "demodb" is not in
 # here on purpose, the tests only read it.
 TEST_DBS = ("alatestdb", "compactdbtest", "destinationdb", "anotherdb",
-            "copydb", "destinationdb1")
+            "copydb", "destinationdb1", "renameadvdb", "renamedadvdb")
 
 
 def findport():
@@ -56,6 +63,11 @@ CUBRID_DATABASES = ""
 
 results = []
 
+# Placeholders whose value is only known once the run has started, see
+# start_kill_targets().
+runtime_vars = {}
+helper_procs = []
+
 # The manager server serves cm_port over TLS with a self signed certificate,
 # so the certificate of the host under test is not verified here.
 ssl_context = ssl._create_unverified_context()
@@ -82,6 +94,8 @@ def replace_env_vars(contents):
     contents = contents.replace("$AUTO_TIME", next_minute.strftime("%H%M"))
     contents = contents.replace("$AUTO_QUERY_TIME",
                                 next_minute.strftime("%Y/%m/%d %H:%M"))
+    for name, value in runtime_vars.items():
+        contents = contents.replace(name, value)
     contents = contents.replace("$CUBRID_DATABASES", str(CUBRID_DATABASES))
     contents = contents.replace("$CUBRID", str(CUBRID))
     return contents
@@ -92,15 +106,19 @@ def load_task(taskfile):
         return json.loads(replace_env_vars(task.read()))
 
 
-def record(name, casefile, task, status, note, expected):
+def record(name, casefile, task, status, note, expected, response=None):
     """Log one result.
 
     Several cases share the same task name (renamedb, renamedb_adoff, ... all
     run the "renamedb" task), so the case file is what identifies a test. It
     leads every line, with the task it runs in brackets.
+
+    `response` is kept for the detailed report only; the console output and the
+    plain XML stay short.
     """
     ok = (status == expected)
-    results.append({"name": name, "file": casefile, "ok": ok, "note": note})
+    results.append({"name": name, "file": casefile, "task": task, "ok": ok,
+                    "note": note, "response": response})
     label = "%s [%s]" % (name, task)
     if ok:
         print(label + " : " + '\033[32m{0}\033[0m'.format(status))
@@ -115,14 +133,21 @@ def send_one(name, req, token, expected="success", casefile=""):
     req["token"] = token
     task = req.get("task", name)
     response = exec_task(cmsip, port, url, json.dumps(req))
+    # Tasks that echo a log file back (loadaccesslog) can carry bytes that are
+    # not valid UTF-8, because the server writes error messages with an
+    # uninitialized buffer into the log. That is a server defect, but it must
+    # not turn into a failure of whatever case happens to read the log.
+    body = response.decode(errors="replace")
     try:
-        data = json.loads(response.decode())
+        data = json.loads(body)
     except ValueError:
         record(name, casefile, task, "invalid",
-               "non JSON response: %s" % response[:200], expected)
+               "non JSON response: %s" % response[:200], expected, body)
         return {"task": task, "status": "failure"}
+    # The raw body is kept verbatim: docs/api/*.md quote the server's own
+    # formatting, so a re-serialized copy would not be comparable.
     record(name, casefile, task, data.get("status"), data.get("note", ""),
-           expected)
+           expected, body)
     return data
 
 
@@ -167,10 +192,29 @@ def dump_one(name, token):
         req["token"] = token
         response = exec_task(cmsip, port, url, json.dumps(req))
         try:
-            data = json.loads(response.decode())
+            data = json.loads(response.decode(errors="replace"))
             print(json.dumps(data, indent=3, sort_keys=True, ensure_ascii=False))
         except ValueError:
             print(response.decode(errors="replace"))
+
+
+def stop_test_servers():
+    """Shut down any server still running for a database the suite creates.
+
+    A stopdb that does not finish leaves "cub_server <db>" behind. Deleting the
+    directory underneath it does not kill it, and the next run then fails on
+    "database is active" or on volumes it cannot mount, so the damage carries
+    over from run to run until someone kills the process by hand.
+    """
+    cubrid_bin = os.path.join(CUBRID, "bin", "cubrid")
+    for name in TEST_DBS:
+        if subprocess.call(["pgrep", "-f", "^cub_server %s$" % name],
+                           stdout=subprocess.DEVNULL) != 0:
+            continue
+        subprocess.call([cubrid_bin, "server", "stop", name],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.call(["pkill", "-9", "-f", "^cub_server %s$" % name],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def reset_test_dbs():
@@ -180,6 +224,7 @@ def reset_test_dbs():
     databases.txt entries around, and the next run then fails on names that are
     already taken. Only the databases the suite creates itself are touched.
     """
+    stop_test_servers()
     for name in TEST_DBS:
         shutil.rmtree(os.path.join(CUBRID_DATABASES, name), ignore_errors=True)
 
@@ -197,6 +242,164 @@ def reset_test_dbs():
     if len(kept) != len(lines):
         with open(dblist, "w") as f:
             f.writelines(kept)
+
+
+def probe(request):
+    """Run a task without recording it, for the setup code below."""
+    request["token"] = token
+    try:
+        return json.loads(exec_task(cmsip, port, url, json.dumps(request)).decode())
+    except ValueError:
+        return {}
+
+
+def find_tranindex(pid, timeout=15):
+    """Return the transaction index demodb gave the client running as `pid`.
+
+    The index is reported as "1(ACTIVE)" but killtran wants a bare number.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        data = probe({"task": "gettransactioninfo", "dbname": "demodb"})
+        for entry in data.get("transactioninfo", []):
+            for tran in entry.get("transaction", []):
+                if tran.get("pid") == str(pid):
+                    match = re.match(r"\d+", tran.get("tranindex", ""))
+                    if match:
+                        return match.group(0)
+        time.sleep(0.5)
+    return ""
+
+
+def record_helper_pid(proc):
+    """Remember a helper process so a killed run can be cleaned up later.
+
+    clean_env() is skipped when the run dies on SIGKILL, and the sleep would
+    then sit there for an hour while the csql session keeps a transaction open
+    on demodb. The pid is written together with the command line so the next
+    run only kills a pid that is still the process we started.
+    """
+    helper_procs.append(proc)
+    directory = os.path.dirname(HELPER_PID_FILE)
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
+    with open(HELPER_PID_FILE, "a") as f:
+        f.write("%d %s\n" % (proc.pid, " ".join(proc.args)))
+
+
+def sweep_stale_helpers():
+    """Kill helpers a previous run left behind, and only those."""
+    try:
+        with open(HELPER_PID_FILE) as f:
+            entries = [line.split(None, 1) for line in f if line.strip()]
+    except IOError:
+        return
+    for pid, cmdline in entries:
+        try:
+            with open("/proc/%s/cmdline" % pid, "rb") as f:
+                running = f.read().replace(b"\0", b" ").decode().strip()
+        except IOError:
+            continue        # already gone, or not ours any more
+        if running == cmdline.strip():
+            print("killing helper left over from an earlier run: %s %s"
+                  % (pid, running))
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except OSError:
+                pass
+    os.remove(HELPER_PID_FILE)
+
+
+def start_kill_targets():
+    """Give killprocess and killtransaction something that really exists.
+
+    Both cases used to carry a hardcoded id (pid 99999, tranindex "2(+)"), so
+    they failed on every host. The suite now creates its own victims and passes
+    their real ids in through $TEST_KILL_PID / $TEST_TRANINDEX.
+    """
+    sweep_stale_helpers()
+
+    dummy = subprocess.Popen(["sleep", "3600"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+    record_helper_pid(dummy)
+    runtime_vars["$TEST_KILL_PID"] = str(dummy.pid)
+
+    csql = subprocess.Popen(
+        [os.path.join(CUBRID, "bin", "csql"), "--CS-mode", "-u", "dba", "demodb"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, universal_newlines=True)
+    record_helper_pid(csql)
+    # With autocommit off the transaction stays open until the process exits,
+    # which is what killtransaction has to find.
+    csql.stdin.write(";autocommit off\nselect count(*) from db_class;\n")
+    csql.stdin.flush()
+
+    tranindex = find_tranindex(csql.pid)
+    if not tranindex:
+        print("\033[33mno transaction found on demodb, killtransaction will "
+              "fail.\033[0m")
+    runtime_vars["$TEST_TRANINDEX"] = tranindex
+
+
+def stop_kill_targets():
+    for proc in helper_procs:
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+    del helper_procs[:]
+    try:
+        os.remove(HELPER_PID_FILE)
+    except OSError:
+        pass
+
+
+def make_loaddb_input(tmpdir):
+    """Unload demodb into a throwaway schema/objects pair for the loaddb case.
+
+    loaddb runs with delete_orignal_files=y, so it consumes whatever it is
+    pointed at. It used to be pointed at demodb's own dump, which the unloaddb
+    case (much later in the list) regenerates -- meaning loaddb was really
+    reading the *previous* run's output, and a run that died in between broke
+    the next one with "file does not exists". Its input is now produced here.
+    """
+    for suffix in ("schema", "objects", "indexes", "trigger"):
+        try:
+            os.remove(os.path.join(tmpdir, "test_loaddb_%s" % suffix))
+        except OSError:
+            pass
+    subprocess.call([os.path.join(CUBRID, "bin", "cubrid"), "unloaddb",
+                     "--CS-mode", "-u", "dba", "-O", tmpdir,
+                     "--output-prefix", "test_loaddb", "demodb"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def wait_for_mon_data(timeout=120):
+    """Wait until the first monitoring sample has been collected.
+
+    set_mon_interval resizes vol_mon, and that file is only created once a
+    gather run has registered the volumes of a database. Called straight after
+    a restart it would find no file and fail, and the failed reset_meta leaves
+    the meta inconsistent for good, so the run has to wait for the first sample
+    before it touches any of the monitoring cases.
+    """
+    meta = os.path.join(CUBRID, "var", "manager", "mon_data", "meta.json")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with open(meta) as f:
+                if json.load(f).get("k_total_vol_num", 0) > 0:
+                    return True
+        except (IOError, ValueError):
+            pass
+        time.sleep(2)
+    print("\033[33mno monitoring data collected within %d s; the "
+          "set_mon_interval and get_mon_statistic cases will fail. Check "
+          "support_mon_statistic in cm.conf.\033[0m" % timeout)
+    return False
 
 
 def build_env():
@@ -220,22 +423,43 @@ def build_env():
     with open(script, "w") as f:
         f.write("#!/bin/sh\necho runscript test\n")
     os.chmod(script, 0o755)
+    make_loaddb_input(tmpdir)
+    # adddbmtuser creates "yifan" and deletedbmtuser drops it again. A run that
+    # died between the two leaves the user behind, and the next adddbmtuser
+    # then fails with "already exist"; this is a no-op when it is not there.
+    probe({"task": "deletedbmtuser", "targetid": "yifan"})
+    wait_for_mon_data()
+    start_kill_targets()
 
 
 def clean_env():
+    stop_kill_targets()
     reset_test_dbs()
 
 
-def write_junit_xml(path):
-    """Write the report the CI job collects."""
+def xml_escape(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def detail_xml_path(path):
+    """`log/result.xml` -> `log/result_detail.xml`."""
+    root, ext = os.path.splitext(path)
+    return root + "_detail" + ext
+
+
+def write_junit_xml(path, with_response=False):
+    """Write the report the CI job collects.
+
+    Two files are produced: the plain one stays small enough to skim, and the
+    "_detail" one carries the full response of every case in <system-out>, so
+    that the documented samples in docs/api/*.md can be checked against what
+    the server really answers without re-running anything.
+    """
     failures = sum(1 for r in results if not r["ok"])
     directory = os.path.dirname(path)
     if directory and not os.path.isdir(directory):
         os.makedirs(directory)
-
-    def escape(text):
-        return (str(text).replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace('"', "&quot;"))
 
     with open(path, "w") as out:
         out.write('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -246,14 +470,78 @@ def write_junit_xml(path):
                   'disabled="0" errors="0" time="0">\n'
                   % (len(results), failures))
         for item in results:
-            out.write('<testcase name="%s" file="%s" status="run" time="0" '
-                      'classname="CMSERVER_TEST">\n'
-                      % (escape(item["name"]), escape(item["file"])))
+            out.write('<testcase name="%s" file="%s" task="%s" status="run" '
+                      'time="0" classname="CMSERVER_TEST">\n'
+                      % (xml_escape(item["name"]), xml_escape(item["file"]),
+                         xml_escape(item.get("task", ""))))
             if not item["ok"]:
                 out.write('<failure message="%s" type=""></failure>\n'
-                          % escape(item["note"]))
+                          % xml_escape(item["note"]))
+            if with_response and item.get("response") is not None:
+                # A "]]>" inside the payload would close the section early.
+                body = item["response"].replace("]]>", "]]]]><![CDATA[>")
+                out.write('<system-out><![CDATA[\n%s\n]]></system-out>\n' % body)
             out.write('</testcase>\n')
         out.write('</testsuite>\n</testsuites>\n')
+
+
+def wait_for_manager(timeout=90):
+    """Block until the manager server answers on cm_port again."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            exec_task(cmsip, port, url, json.dumps({"task": "keepalive"}))
+            return True
+        except Exception:
+            time.sleep(1)
+    print("\033[31mthe manager server did not come back up within %d s.\033[0m"
+          % timeout)
+    return False
+
+
+def reset_mon_data(cubrid_home):
+    """Throw away the monitoring statistics files.
+
+    They have to go while the service is down. cub_manager rebuilds them on the
+    way up, and only a rebuilt set is guaranteed to be consistent: reset_meta()
+    resizes broker/db/volume/os files one by one and updates k_interval last, so
+    a failure in the middle (a missing vol_mon, for instance) leaves the files
+    sized for the new interval and the meta claiming the old one. Once that
+    happens set_mon_interval fails on every later call and the yearly
+    get_mon_statistic reads past the end of the file.
+    """
+    mon_dir = os.path.join(cubrid_home, "var", "manager", "mon_data")
+    if not os.path.isdir(mon_dir):
+        return
+    for name in os.listdir(mon_dir):
+        try:
+            os.remove(os.path.join(mon_dir, name))
+        except OSError:
+            pass
+
+
+def restart_services():
+    """Start the run from a known state.
+
+    A run that was killed can leave a csql session holding a transaction on
+    demodb, a cub_server that stopdb never managed to stop, or monitoring files
+    that no longer match their meta. None of that is repaired by deleting
+    directories, so the suite bounces the whole service first.
+    """
+    cubrid_home = os.environ["CUBRID"]
+    cubrid_bin = os.path.join(cubrid_home, "bin", "cubrid")
+    print("restarting the CUBRID service to start from a known state ...")
+    sweep_stale_helpers()
+    subprocess.call([cubrid_bin, "service", "stop"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    reset_mon_data(cubrid_home)
+    subprocess.call([cubrid_bin, "service", "start"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # demodb is what most of the cases run against; "service start" only starts
+    # it when cubrid.conf lists it, so ask for it explicitly.
+    subprocess.call([cubrid_bin, "server", "start", "demodb"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wait_for_manager()
 
 
 def init_env():
@@ -271,20 +559,32 @@ def init_env():
     return token, response["CUBRID"], response["CUBRID_DATABASES"]
 
 
+# `--dump <case> [<case> ...]` logs in and prints the raw response of each case
+# with the real token, instead of running the whole task list. It is a probe, so
+# it uses the server as it finds it and never restarts anything.
+dump_mode = len(sys.argv) > 1 and sys.argv[1] == "--dump"
+
+if not dump_mode:
+    restart_services()
+
 token, CUBRID, CUBRID_DATABASES = init_env()
 # The calls above only set up the session, the report covers the task list.
 results = []
 
-# `--dump <case> [<case> ...]` logs in and prints the raw response of each case
-# with the real token, instead of running the whole task list.
-if len(sys.argv) > 1 and sys.argv[1] == "--dump":
+if dump_mode:
     for name in sys.argv[2:]:
         print("===== %s =====" % name)
         dump_one(name, token)
     sys.exit(0)
 
-build_env()
+# A plain "kill" skips the finally below, so make the helper processes go away
+# on the usual termination signals as well.
+atexit.register(stop_kill_targets)
+for _signum in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(_signum, lambda signum, frame: sys.exit(128 + signum))
+
 try:
+    build_env()
     do_all_jobs(token)
 finally:
     clean_env()
@@ -292,6 +592,7 @@ finally:
 xmlfile = os.environ.get("TEST_XML")
 if xmlfile:
     write_junit_xml(xmlfile)
+    write_junit_xml(detail_xml_path(xmlfile), with_response=True)
 
 nfailed = sum(1 for r in results if not r["ok"])
 if nfailed:

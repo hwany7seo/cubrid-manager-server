@@ -71,23 +71,53 @@ python3 test_tasks.py --dump getbrokersinfo checkfile
 
 1. **포트 탐색** — `findport()`가 `$CUBRID/conf/cm.conf`의 `cm_port`를 읽는다.
    (`cm_port 8001` / `cm_port=8001` 두 표기 모두 인식. 없으면 8001로 폴백)
-2. **세션 준비** — `init_env()`
+2. **서비스 재시작** — `restart_services()` (전체 실행에서만, `--dump`는 건너뜀)
+   - `cubrid service stop` → `mon_data/*` 삭제 → `cubrid service start`
+     → `cubrid server start demodb` → `cm_port` 응답 대기
+   - 중단된 이전 실행이 남긴 클라이언트/서버/모니터링 메타 불일치를 한 번에 털어낸다.
+     모니터링 파일은 정지 상태에서만 안전하게 지울 수 있고, 재기동 시 CMS가 다시 만든다.
+3. **세션 준비** — `init_env()`
    - `task_test_case_json/login.txt`로 로그인 → **실제 토큰** 획득
      (실패 시 비밀번호를 대화식으로 입력받아 재시도)
    - `getenv`로 `CUBRID` / `CUBRID_DATABASES` 실제 경로를 받아 치환에 사용
-3. **환경 구성** — `build_env()`
+4. **환경 구성** — `build_env()`
+   - `reset_test_dbs()`로 이전 실행 잔재 정리(테스트가 만든 DB의 디렉터리 ·
+     `databases.txt` 항목 · 살아남은 `cub_server <db>` 프로세스)
    - `copydb_advance`가 복사할 `destinationdb1` 디렉터리 생성
    - `getcaslogtopresult` / `removecasrunnertmpfile`가 읽을 픽스처를 `$CUBRID/tmp`로 복사
-4. **본 실행** — `do_all_jobs()`가 `task_list.txt`를 순서대로 처리
-5. **정리** — `clean_env()`가 생성한 임시 DB 디렉터리 삭제 (예외가 나도 실행)
-6. **리포트** — `TEST_XML` 지정 시 JUnit XML 기록, 실패 수만큼 종료 코드 반영
+   - `removelog`용 일회용 파일과 `runscript`용 스크립트(`$CUBRID/tmp/test_runscript.sh`) 생성
+   - `make_loaddb_input()`이 `loaddb`가 소비할 일회용 덤프를 만든다
+     (`loaddb`는 `delete_orignal_files:"y"`라 입력을 지운다. 예전에는 demodb의 원본
+     덤프를 가리켜서 직전 실행의 `unloaddb` 결과에 의존했다)
+   - 중단된 실행이 남긴 dbmt 사용자 `yifan`을 best-effort로 제거
+   - `wait_for_mon_data()`가 첫 모니터링 수집이 끝날 때까지 대기
+     (그 전에는 `vol_mon`이 없어 `set_mon_interval`이 실패한다)
+   - `start_kill_targets()`가 `killprocess` / `killtransaction`의 대상을 만들고
+     실제 id를 플레이스홀더에 채운다 (4.3 참고)
+5. **본 실행** — `do_all_jobs()`가 `task_list.txt`를 순서대로 처리
+6. **정리** — `clean_env()`가 보조 프로세스를 종료하고 임시 DB를 정리
+   (`finally` + `atexit` + `SIGTERM`/`SIGHUP` 핸들러로 비정상 종료에서도 실행)
+7. **리포트** — `TEST_XML` 지정 시 JUnit XML 기록, 실패 수만큼 종료 코드 반영
+   - `TEST_XML=log/result.xml`이면 **두 개**가 나온다.
+     `log/result.xml`은 통과/실패만 담은 간단한 리포트(CI용),
+     `log/result_detail.xml`은 각 `<testcase>`에 **서버 응답 원문**을 `<system-out>`으로
+     담는다. 파일명은 `TEST_XML`에 `_detail`을 붙여 만든다.
+   - 응답은 재직렬화하지 않고 **서버가 보낸 그대로** 저장한다. `docs/api/*.md`의
+     Response Sample이 서버의 출력 형식을 그대로 인용하고 있어서, 다시 찍으면
+     비교가 안 되기 때문이다.
+
+> 실행이 `kill -9`로 죽으면 `clean_env()`가 돌지 못한다. 이때 csql 세션은 파이프가 닫혀
+> 스스로 종료하므로 트랜잭션은 남지 않지만, 더미 `sleep`은 남는다. `start_kill_targets()`가
+> `log/helper_pids`에 pid와 커맨드라인을 적어 두고, 다음 실행이 커맨드라인이 일치하는
+> 경우에만 회수한다.
 
 ### 4.2 토큰 처리 (중요)
 
-케이스 파일(`task_test_case_json/*.txt`)에는 과거의 토큰 문자열이 하드코딩되어 있지만,
-러너가 매 요청 직전에 **로그인으로 얻은 실제 토큰으로 덮어쓴다**(`send_one`의
-`req["token"] = token`). 따라서 케이스 파일의 토큰 값은 그대로 두어도 되며(플레이스홀더),
-실제 인증은 항상 유효 토큰으로 이뤄진다.
+러너가 매 요청 직전에 **로그인으로 얻은 실제 토큰을 채워 넣는다**(`send_one`과
+`dump_one`의 `req["token"] = token`). 따라서 케이스 파일의 토큰 값은 전송되지 않으며,
+`"token": ""`로 비워 둔다. 과거에는 실행할 때마다 달라지는 만료된 토큰 문자열이
+파일마다 하드코딩돼 있었는데(30가지), 아무 의미가 없어 전부 빈 문자열로 정리했다.
+새 케이스를 만들 때도 `"token": ""`로 두면 된다(키를 생략해도 동작한다).
 
 ### 4.3 요청 파일 포맷
 
@@ -96,7 +126,7 @@ python3 test_tasks.py --dump getbrokersinfo checkfile
 ```json
 {
   "task": "getbrokerstatus",
-  "token": "PLACEHOLDER",
+  "token": "",
   "bname": "query_editor"
 }
 ```
@@ -112,8 +142,12 @@ python3 test_tasks.py --dump getbrokersinfo checkfile
 | `$AUTO_DATE` | 다음 1분의 날짜 `YYYY-MM-DD` |
 | `$AUTO_TIME` | 다음 1분의 시각 `HHMM` |
 | `$AUTO_QUERY_TIME` | 다음 1분 `YYYY/MM/DD HH:MM` |
+| `$TEST_KILL_PID` | `build_env()`가 띄운 더미 프로세스의 pid (`killprocess`용) |
+| `$TEST_TRANINDEX` | `build_env()`가 demodb에 열어 둔 트랜잭션의 인덱스 (`killtransaction`용) |
 
 `$AUTO_*`는 예약 작업(backup/exec query 등)을 “곧 실행되도록” 만들기 위한 것이다.
+`$TEST_*`는 고정 id(pid `99999`, tranindex `2(+)`)로는 어느 호스트에서도 통과할 수 없던
+두 케이스를 결정적으로 만들기 위한 것이다.
 
 ### 4.4 시나리오 파일: `task_list.txt`
 
@@ -129,7 +163,7 @@ python3 test_tasks.py --dump getbrokersinfo checkfile
 - `<name>`은 `task_test_case_json/<name>.txt`의 파일명(확장자 제외)과 일치해야 한다.
 - 실행 **순서에 의미가 있다**. 예: `createdb` → `startdb` → … → `deletedb`.
   상태를 만드는 케이스가 그것을 쓰는 케이스보다 먼저 와야 한다.
-- 현재 약 179개 항목(그중 부정 테스트 61개)을 담고 있다.
+- 현재 184개 항목(그중 부정 테스트 59개)을 담고 있으며, 배열 케이스가 펼쳐져 199건이 실행된다.
 
 ### 4.5 판정 방식
 
@@ -160,7 +194,7 @@ python3 test_tasks.py --dump <name> [<name> ...]
    ```json
    {
      "task": "<task>",
-     "token": "PLACEHOLDER",
+     "token": "",
      "...": "필요한 파라미터. 경로는 $CUBRID / $CUBRID_DATABASES 사용"
    }
    ```
@@ -177,20 +211,35 @@ python3 test_tasks.py --dump <name> [<name> ...]
 - **요청 파라미터 변경**: 해당 `task_test_case_json/<task>.txt` 수정.
 - **성공/실패 조건 변경**: `task_list.txt`의 기대값(`,failure` 유무) 조정.
 - **응답 구조 변경**: 러너는 `status`만 보므로 통과 여부엔 영향이 없지만,
-  `docs/api/<task>.md`의 Response 규격/샘플을 실제 응답에 맞춰 갱신한다
-  (`--dump`로 실제 값 확인).
+  `docs/api/<task>.md`의 Response 규격/샘플을 실제 응답에 맞춰 갱신한다.
 
-### 5.3 API 제거/미지원
+### 5.3 문서 샘플을 실제 응답과 맞추기
+
+`make test` 한 번이면 `log/result_detail.xml`에 모든 케이스의 **응답 원문**이 남는다.
+`docs/api/<task>.md`의 Response Sample은 이 값을 기준으로 갱신한다.
+(`--dump`도 쓸 수 있지만 `deletedb` / `setsysparam` 같은 파괴적 task에는 부작용이 있다.)
+
+두 가지 규칙이 있다.
+
+- **Request Sample과 Response Sample은 같은 요청/응답 한 쌍이어야 한다.** 서버가 요청 값을
+  그대로 되돌려 주는 필드(`addvoldb`의 `dbname`, `kill_process`의 `name` 등)는 Request
+  Sample 쪽 값에 맞춘다. 테스트가 쓰는 `alatestdb` 같은 이름을 그대로 옮기면 문서만 보고
+  따라 할 수 없다.
+- **서버가 값을 가공하는 필드는 실제 응답을 그대로 둔다.** 예: `getaddbrokerinfo`는
+  `brokerconf` 요청에 `broker`로 답하고, `getcmsenv`는 `task`를 `getversion`으로 답한다.
+  요청에 맞춰 고치면 오히려 틀린 문서가 된다.
+
+### 5.4 API 제거/미지원
 
 - 서버에서 제거된 task는 `task_list.txt`에서 삭제하거나 `//`로 주석 처리한다.
   (미등록 task를 남기면 `Undefined request`로 항상 실패한다)
 
-### 5.4 지켜야 할 규칙
+### 5.5 지켜야 할 규칙
 
 - `task_list.txt`는 **ASCII로 유지**한다. 러너가 UTF-8 로케일에서 텍스트로 읽으므로,
   비ASCII(예: 한글 주석 EUC-KR) 바이트가 섞이면 목록 파싱 단계에서 크래시한다.
   주석은 영문으로 작성한다.
-- 케이스 파일에 **실제 토큰을 넣을 필요가 없다**. 러너가 항상 덮어쓴다.
+- 케이스 파일의 `token`은 **빈 문자열로 둔다**. 러너가 항상 실제 토큰을 채워 넣는다.
 - 새 픽스처가 필요하면 `task_test_config/`에 넣고 `build_env()`에서 배치하도록 한다.
 
 ---
