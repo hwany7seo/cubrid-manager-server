@@ -57,6 +57,7 @@ addvoldb_bigsize,failure
 addvoldb_nullpurpose,failure
 addvoldb_nullsize,failure
 dbspaceinfo
+dbspace
 lockdb
 backupdb
 backupdb_nulldir,failure
@@ -185,6 +186,7 @@ loadaccesslog
 checkfile
 analyzecaslog
 analyzecaslog_option_no
+analyzecaslog_nolist,failure
 getadminloginfo
 getallsysparam
 getallsysparam_errorconf,failure
@@ -198,6 +200,10 @@ paramdump
 paramdump_nullname,failure
 statdump
 statdump_nullname,failure
+// start_statdump must stay right before stop_statdump: stop fails with
+// "no statdump running" unless the background process was just started.
+start_statdump
+stop_statdump
 plandump
 plandump_nullname,failure
 
@@ -215,6 +221,11 @@ getstandbyserverstat
 rolechange
 getdbmode
 //heartbeatlist
+// ha_status / gethaapplyinfo need an HA-configured instance. On a standalone
+// server ha_status returns "The server was not configured for HA." and
+// gethaapplyinfo has no ha_copy log path to read. Enable them on an HA setup.
+//ha_status
+//gethaapplyinfo
 
 // tasks set conf files
 setsysparam_cmconf

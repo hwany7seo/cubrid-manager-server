@@ -1,5 +1,0 @@
-{"task":"applylogdb",
-"token":"",
-"dbname":"demodb",
-"la_max_mem_size":"200",
-"logpath":"$CUBRID_DATABASES/applylogdb"}

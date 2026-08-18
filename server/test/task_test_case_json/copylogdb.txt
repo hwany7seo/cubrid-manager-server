@@ -1,6 +1,0 @@
-{"task":"copylogdb",
-"token":"",
-"dbname":"demodb",
-"mode":"sync",
-"logpath":"$CUBRID_DATABASES/copylogdb",
-"hostname":"localhost"}

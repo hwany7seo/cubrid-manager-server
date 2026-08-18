@@ -1,4 +1,4 @@
 {"task":"getfolderswithkeyword",
 "token":"",
 "search_folder":"$CUBRID/tmp",
-"keyword":"res"}
+"keyword":"*result*"}

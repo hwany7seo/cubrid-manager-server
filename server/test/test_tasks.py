@@ -310,6 +310,22 @@ def sweep_stale_helpers():
     os.remove(HELPER_PID_FILE)
 
 
+def open_transaction():
+    """Open a transaction on demodb and leave it open.
+
+    With autocommit off the transaction lives until the process exits, and the
+    process exits on its own when the runner dies, because stdin is a pipe.
+    """
+    csql = subprocess.Popen(
+        [os.path.join(CUBRID, "bin", "csql"), "--CS-mode", "-u", "dba", "demodb"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, universal_newlines=True)
+    record_helper_pid(csql)
+    csql.stdin.write(";autocommit off\nselect count(*) from db_class;\n")
+    csql.stdin.flush()
+    return csql
+
+
 def start_kill_targets():
     """Give killprocess and killtransaction something that really exists.
 
@@ -324,21 +340,19 @@ def start_kill_targets():
     record_helper_pid(dummy)
     runtime_vars["$TEST_KILL_PID"] = str(dummy.pid)
 
-    csql = subprocess.Popen(
-        [os.path.join(CUBRID, "bin", "csql"), "--CS-mode", "-u", "dba", "demodb"],
-        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, universal_newlines=True)
-    record_helper_pid(csql)
-    # With autocommit off the transaction stays open until the process exits,
-    # which is what killtransaction has to find.
-    csql.stdin.write(";autocommit off\nselect count(*) from db_class;\n")
-    csql.stdin.flush()
+    # Two transactions, not one: killtransaction reports the transactions that
+    # are still there after the kill, so with a single victim it can only ever
+    # answer "transactioninfo": null. The second one is the bystander.
+    victim, bystander = (open_transaction(), open_transaction())
 
-    tranindex = find_tranindex(csql.pid)
+    tranindex = find_tranindex(victim.pid)
     if not tranindex:
         print("\033[33mno transaction found on demodb, killtransaction will "
               "fail.\033[0m")
     runtime_vars["$TEST_TRANINDEX"] = tranindex
+    if not find_tranindex(bystander.pid):
+        print("\033[33monly one transaction on demodb, killtransaction will "
+              "report an empty list.\033[0m")
 
 
 def stop_kill_targets():
@@ -423,6 +437,16 @@ def build_env():
     with open(script, "w") as f:
         f.write("#!/bin/sh\necho runscript test\n")
     os.chmod(script, 0o755)
+    # analyzecaslog runs broker_log_top over a broker SQL log. Pointed at a live
+    # CAS log it answers "resultlist": null, because nothing in this suite sends
+    # SQL through a broker and broker_log_top then writes an empty report. This
+    # fixture carries two executed queries so the parsing is actually covered.
+    shutil.copy(os.path.join(TEST_CONFIG_DIR, "test_analyzecaslog.sql.log"), tmpdir)
+    # getfolderswithkeyword searches for directories whose name contains the
+    # keyword ("res"). Without one it answers "folders": null.
+    folder = os.path.join(tmpdir, "test_result_folder")
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
     make_loaddb_input(tmpdir)
     # adddbmtuser creates "yifan" and deletedbmtuser drops it again. A run that
     # died between the two leaves the user behind, and the next adddbmtuser

@@ -1,4 +1,4 @@
 {"task":"analyzecaslog",
 "token":"",
-"logfilelist":[{"logfile":"$CUBRID/log/broker/sql_log/query_editor_1.sql.log"}],
+"logfilelist":[{"logfile":"$CUBRID/tmp/test_analyzecaslog.sql.log"}],
 "option_t":"yes"}

@@ -2,6 +2,11 @@
 "token":"",
 "targetid":"yifan",
 "password":"1111",
+"dbauth":[{
+"dbname":"demodb",
+"dbid":"dba",
+"dbpassword":"",
+"dbbrokeraddress":"localhost,33000"}],
 "casauth":"admin",
 "dbcreate":"none",
 "statusmonitorauth":"admin"}
