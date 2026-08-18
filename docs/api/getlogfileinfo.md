@@ -62,8 +62,15 @@ Get logfile info.
             {
                "lastupdate" : "2026.08.18",
                "owner" : "cubrid",
+               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/error_log/query_editor_1.err",
+               "size" : "329",
+               "type" : "error"
+            },
+            {
+               "lastupdate" : "2026.08.18",
+               "owner" : "cubrid",
                "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/sql_log/query_editor_1.sql.log",
-               "size" : "5444",
+               "size" : "7087",
                "type" : "script"
             },
             {
@@ -71,13 +78,6 @@ Get logfile info.
                "owner" : "cubrid",
                "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/sql_log/query_editor_1.slow.log",
                "size" : "0",
-               "type" : "script"
-            },
-            {
-               "lastupdate" : "2026.08.18",
-               "owner" : "cubrid",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/sql_log/query_editor_2.sql.log",
-               "size" : "4414",
                "type" : "script"
             }
          ]
@@ -89,4 +89,4 @@ Get logfile info.
 }
 ```
 
-> Lists are shortened to 3 entries here; the real response returned up to 10.
+> Lists are shortened to 3 entries here; the real response returned up to 11.

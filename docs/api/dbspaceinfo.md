@@ -80,7 +80,7 @@ spaceinfo is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "53 ms",
+   "__EXEC_TIME" : "57 ms",
    "dbinfo" : [
       {
          "free_size" : "15616",
@@ -102,7 +102,7 @@ spaceinfo is composed of objects with following structure
          "used_size" : "62"
       }
    ],
-   "freespace" : "446132",
+   "freespace" : "445676",
    "logpagesize" : "4096",
    "note" : "none",
    "pagesize" : "4096",

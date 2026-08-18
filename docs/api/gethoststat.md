@@ -38,14 +38,14 @@ Get host level statistics.
 
 ```
 {
-   "__EXEC_TIME" : "0 ms",
-   "cpu_idle" : "621124092571",
-   "cpu_iowait" : "67249554",
-   "cpu_kernel" : "1655488209",
-   "cpu_user" : "8431113251",
-   "mem_phy_free" : "87565447168",
+   "__EXEC_TIME" : "1 ms",
+   "cpu_idle" : "621162798590",
+   "cpu_iowait" : "67297842",
+   "cpu_kernel" : "1656060592",
+   "cpu_user" : "8433759750",
+   "mem_phy_free" : "87453343744",
    "mem_phy_total" : "134630449152",
-   "mem_swap_free" : "670998528",
+   "mem_swap_free" : "670253056",
    "mem_swap_total" : "17179865088",
    "note" : "none",
    "status" : "success",

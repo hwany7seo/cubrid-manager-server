@@ -44,7 +44,7 @@ disk_info is composed of objects with following structure
 {
    "disk_info" : [
       {
-         "free_size" : "467935289344",
+         "free_size" : "467456258048",
          "name" : "/",
          "total_size" : "1832296755200"
       }

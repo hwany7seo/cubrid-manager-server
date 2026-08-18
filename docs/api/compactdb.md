@@ -9,6 +9,8 @@ Compact database.
 | task | task name |
 | token | token string encrypted. |
 | dbname | database name |
+| file| file_path_and_name|
+| class_list | class list|
 | verbose | on-off indicating whether to show detailed information |
 
 ## Request Sample
@@ -55,4 +57,4 @@ log is composed of objects with following structure
 }
 ```
 
-> Lists are shortened to 3 entries here; the real response returned up to 234.
+> Lists are shortened to 3 entries here.

@@ -93,7 +93,7 @@ When the broker is running (`brokerstatus` is `ON`), each broker also carries it
                "long_tran" : "0",
                "long_tran_time" : "60.00",
                "name" : "query_editor",
-               "pid" : "1875077",
+               "pid" : "1998369",
                "port" : "30000",
                "query" : "0",
                "req" : "0",

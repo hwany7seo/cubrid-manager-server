@@ -12,7 +12,19 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
 | logfile | the full path of a broker SQL log file |
 | option_t | yes or no, analyze the log by transaction |
 
+The log has to contain executed queries. `broker_log_top` writes an empty report
+for a log which only holds `CAS STARTED` / `CAS TERMINATED` lines, and the answer
+is then `"resultlist": null`.
+
+**Only the first entry of `logfilelist` is analyzed.** The JSON layer turns every
+element of an array into its own `open`/`close` section
+(`json_to_nv`, `cm_server_interface.cpp:310`), while the handler reads a single
+section (`nv_locate`, `cm_job_task.cpp:9437`), so the second element onwards is
+dropped without any error. Analyze one log per request.
+
 ## Request Sample
+
+Analysis by transaction, `option_t` is `yes`:
 
 ```
 {
@@ -24,6 +36,21 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
     }
   ],
   "option_t": "yes"
+}
+```
+
+Analysis by query, `option_t` is `no`:
+
+```
+{
+  "task": "analyzecaslog",
+  "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
+  "logfilelist": [
+    {
+      "logfile": "$CUBRID/log/broker/sql_log/query_editor_1.sql.log"
+    }
+  ],
+  "option_t": "no"
 }
 ```
 
@@ -63,11 +90,73 @@ Otherwise (analysis by query):
 
 ```
 {
-   "__EXEC_TIME" : "23 ms",
+   "__EXEC_TIME" : "18 ms",
    "note" : "none",
-   "resultfile" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/analyzelog_res_141_1787006473_176380_129",
-   "resultlist" : null,
+   "resultfile" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/analyzelog_res_141_1787011730_298373_54",
+   "resultlist" : [
+      {
+         "result" : [
+            {
+               "exec_time" : "0.133",
+               "qindex" : "[Q1]"
+            },
+            {
+               "exec_time" : "0.047",
+               "qindex" : "[Q2]"
+            }
+         ]
+      }
+   ],
    "status" : "success",
+   "task" : "analyzecaslog"
+}
+```
+
+### option_t = "no"
+
+The statistics only exist in this mode: `broker_log_top` writes them to
+`log_top.res`, while the `-t` run above writes `log_top.t`, which carries no
+per-query aggregates.
+
+```
+{
+   "__EXEC_TIME" : "19 ms",
+   "note" : "none",
+   "resultfile" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/analyzelog_res_141_1787011889_556772_925",
+   "resultlist" : [
+      {
+         "result" : [
+            {
+               "avg" : "0.133",
+               "cnt" : "1",
+               "err" : "0",
+               "max" : "0.133",
+               "min" : "0.133",
+               "qindex" : "[Q1]"
+            },
+            {
+               "avg" : "0.047",
+               "cnt" : "1",
+               "err" : "0",
+               "max" : "0.047",
+               "min" : "0.047",
+               "qindex" : "[Q2]"
+            }
+         ]
+      }
+   ],
+   "status" : "success",
+   "task" : "analyzecaslog"
+}
+```
+
+### logfilelist missing
+
+```
+{
+   "__EXEC_TIME" : "0 ms",
+   "note" : "Parameter(logfilelist) missing in the request",
+   "status" : "failure",
    "task" : "analyzecaslog"
 }
 ```

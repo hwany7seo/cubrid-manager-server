@@ -71,9 +71,9 @@ The temporary files reported in `query_result_file` are removed with
 
 ```
 {
-   "__EXEC_TIME" : "34 ms",
+   "__EXEC_TIME" : "27 ms",
    "note" : "none",
-   "query_result_file" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/log_run_res_142_1787006472_472671_816",
+   "query_result_file" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/tmp/log_run_res_142_1787011729_633904_383",
    "query_result_file_num" : "1",
    "result_list" : [
       {

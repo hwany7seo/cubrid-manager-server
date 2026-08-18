@@ -90,4 +90,4 @@ Get the information of tables from a database.
 }
 ```
 
-> Lists are shortened to 3 entries here; the real response returned up to 74.
+> Lists are shortened to 3 entries here.

@@ -60,7 +60,7 @@ See [getdbmtuserinfo](getdbmtuserinfo.md) for the same structure in detail.
 
 ```
 {
-   "__EXEC_TIME" : "1 ms",
+   "__EXEC_TIME" : "2 ms",
    "dblist" : [
       {
          "dbs" : [
@@ -96,7 +96,17 @@ See [getdbmtuserinfo](getdbmtuserinfo.md) for the same structure in detail.
             {
                "@id" : "yifan",
                "casauth" : "admin",
-               "dbauth" : null,
+               "dbauth" : [
+                  {
+                     "auth_info" : [
+                        {
+                           "@dbid" : "dba",
+                           "dbbrokeraddress" : "localhost,33000",
+                           "dbname" : "demodb"
+                        }
+                     ]
+                  }
+               ],
                "dbcreate" : "none",
                "statusmonitorauth" : "admin"
             }

@@ -111,7 +111,7 @@ Get database statistics from a statdump utility.
 
 ```
 {
-   "__EXEC_TIME" : "73 ms",
+   "__EXEC_TIME" : "54 ms",
    "data_page_buffer_hit_ratio" : "0",
    "dbname" : "demodb",
    "note" : "none",
@@ -191,7 +191,7 @@ Get database statistics from a statdump utility.
    "num_tran_start_topops" : "0",
    "status" : "success",
    "task" : "statdump",
-   "time" : "2026/08/18 07:41:13",
+   "time" : "2026/08/18 09:08:50",
    "time_ha_replication_delay" : "0"
 }
 ```

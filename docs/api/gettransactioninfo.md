@@ -49,7 +49,7 @@ The gettransactioninfo interface fetches database transaction information.
 
 ```json
 {
-   "__EXEC_TIME" : "52 ms",
+   "__EXEC_TIME" : "50 ms",
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
@@ -61,11 +61,22 @@ The gettransactioninfo interface fetches database transaction information.
                "@user" : "DBA",
                "SQL_ID" : "empty",
                "host" : "ai-work-49",
-               "pid" : "1874175",
+               "pid" : "1997470",
                "program" : "csql",
                "query_time" : "0.00",
-               "tran_time" : "7.20",
+               "tran_time" : "7.40",
                "tranindex" : "1(ACTIVE)",
+               "wait_for_lock_holder" : "-1"
+            },
+            {
+               "@user" : "DBA",
+               "SQL_ID" : "empty",
+               "host" : "ai-work-49",
+               "pid" : "1997471",
+               "program" : "csql",
+               "query_time" : "0.00",
+               "tran_time" : "7.40",
+               "tranindex" : "2(ACTIVE)",
                "wait_for_lock_holder" : "-1"
             }
          ]

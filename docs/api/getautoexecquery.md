@@ -53,7 +53,7 @@ planlist is composed of `queryplan` objects with following structure
          "queryplan" : [
             {
                "@username" : "dba",
-               "detail" : "2026/08/18 07:41",
+               "detail" : "2026/08/18 09:09",
                "period" : "ONE",
                "query_id" : "bbaa",
                "query_string" : "select * from db_class;"

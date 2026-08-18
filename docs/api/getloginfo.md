@@ -45,7 +45,7 @@ log is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "1 ms",
+   "__EXEC_TIME" : "0 ms",
    "dbname" : "demodb",
    "loginfo" : [
       {
@@ -60,7 +60,7 @@ log is composed of objects with following structure
                "@owner" : "cubrid",
                "lastupdate" : "2026.08.18",
                "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/server/demodb_latest.err",
-               "size" : "6453"
+               "size" : "6695"
             },
             {
                "@owner" : "cubrid",
@@ -77,4 +77,4 @@ log is composed of objects with following structure
 }
 ```
 
-> Lists are shortened to 3 entries here; the real response returned up to 15.
+> Lists are shortened to 3 entries here; the real response returned up to 18.

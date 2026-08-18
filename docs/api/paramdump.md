@@ -253,7 +253,7 @@ listed below. The same parameter can hold a different value on each side.
 
 ```
 {
-   "__EXEC_TIME" : "72 ms",
+   "__EXEC_TIME" : "59 ms",
    "client" : [
       {
          "access_ip_control" : "n",
@@ -538,7 +538,7 @@ listed below. The same parameter can hold a different value on each side.
          "double_write_buffer_size" : "2097152",
          "enable_memory_monitoring" : "n",
          "enable_string_compression" : "y",
-         "error_log" : "\"server/demodb_20260818_0740.err\"",
+         "error_log" : "\"server/demodb_20260818_0908.err\"",
          "error_log_level" : "\"notification\"",
          "error_log_production_mode" : "y",
          "error_log_size" : "536870912",

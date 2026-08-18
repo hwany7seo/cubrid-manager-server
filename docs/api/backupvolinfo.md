@@ -37,19 +37,19 @@ The backupvolinfo interface will get database backup volume information.
 
 ```
 {
-   "__EXEC_TIME" : "78 ms",
+   "__EXEC_TIME" : "82 ms",
    "line" : [
       "",
       "",
       "*** BACKUP HEADER INFORMATION ***",
       "",
       "Database Name: /home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/alatestdb",
-      "   DB Creation Time: Tue Aug 18 07:40:39 2026",
+      "   DB Creation Time: Tue Aug 18 09:08:16 2026",
       "   Pagesize: 4096",
       "Backup Level: 0 (FULL LEVEL)",
       "   Start_lsa: -1|-1",
       "   Last_lsa: 781|3000",
-      "Backup Time: Tue Aug 18 07:40:47 2026",
+      "Backup Time: Tue Aug 18 09:08:25 2026",
       "   Backup Unit Num: 0",
       "Release: 11.5.0",
       "   Disk Version: 11.5",
@@ -58,7 +58,7 @@ The backupvolinfo interface will get database backup volume information.
       "   Zip Level: 1 (ZIP LEVEL 1)",
       "Include Active Log: YES",
       "Previous Backup Level: 0",
-      "   Time: Tue Aug 18 07:40:46 2026",
+      "   Time: Tue Aug 18 09:08:24 2026",
       "   (start_lsa was -1|-1)",
       "",
       "Database Volume Name: /home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/alatestdb_keys",

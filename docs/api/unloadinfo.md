@@ -53,8 +53,8 @@ database is composed of objects with following structure
    "database" : [
       {
          "dbname" : "demodb",
-         "object" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_objects;2026.08.18 07:41",
-         "schema" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_schema;2026.08.18 07:41"
+         "object" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_objects;2026.08.18 09:08",
+         "schema" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/demodb_schema;2026.08.18 09:08"
       }
    ],
    "note" : "none",

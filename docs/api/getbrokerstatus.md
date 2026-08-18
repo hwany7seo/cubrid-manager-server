@@ -79,13 +79,13 @@ jobinfo is composed of objects with following structure
          "as_dbname" : "",
          "as_error_query" : "0",
          "as_id" : "1",
-         "as_lat" : "2026/08/18 07:41:09",
+         "as_lat" : "2026/08/18 09:08:46",
          "as_lct" : "",
          "as_long_query" : "0",
          "as_long_tran" : "0",
          "as_num_query" : "0",
          "as_num_tran" : "0",
-         "as_pid" : "1875078",
+         "as_pid" : "1998370",
          "as_psize" : "6412",
          "as_status" : "IDLE"
       },
@@ -99,13 +99,13 @@ jobinfo is composed of objects with following structure
          "as_dbname" : "",
          "as_error_query" : "0",
          "as_id" : "2",
-         "as_lat" : "2026/08/18 07:41:09",
+         "as_lat" : "2026/08/18 09:08:46",
          "as_lct" : "",
          "as_long_query" : "0",
          "as_long_tran" : "0",
          "as_num_query" : "0",
          "as_num_tran" : "0",
-         "as_pid" : "1875079",
+         "as_pid" : "1998371",
          "as_psize" : "6412",
          "as_status" : "IDLE"
       }
@@ -114,7 +114,7 @@ jobinfo is composed of objects with following structure
    "note" : "none",
    "status" : "success",
    "task" : "getbrokerstatus",
-   "time" : "2026/08/18 07:41:10"
+   "time" : "2026/08/18 09:08:47"
 }
 ```
 

@@ -72,7 +72,7 @@ templatelist is composed of objects with following structure
                "sampling_term" : "1",
                "server_conn_cli_request" : "1",
                "task" : "tatustemplate",
-               "token" : "a91333c783363ed09353f515b95f07f"
+               "token" : "a91333c78c2323051b446bca163966d"
             }
          ]
       }

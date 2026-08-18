@@ -121,4 +121,4 @@ dbauth is composed of objects with following structure
 }
 ```
 
-> Lists are shortened to 1 entry here; the real response returned up to 2.
+> Lists are shortened to 1 entry here.

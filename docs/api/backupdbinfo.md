@@ -29,28 +29,57 @@ The backupdbinfo interface will get database backup information.
 | note | if failed, a brief description will be given here |
 | dbdir | the default backup directory of the database |
 | freespace | the free space of the database directory, in MB |
-| level\<n\> | the backup volumes of that backup level, one key per level (`level0`, `level1`, ...) |
+| level\<n\> | the backup volumes of that backup level, one key per level in use |
 
 ### level\<n\>
 
-Every backup level is composed of objects with following structure
+The key is the backup level of the volume, taken from the first column of
+`<log path>/<dbname>_bkvinf`, which the engine writes as
+`<level> <unit number> <volume path>`. The levels are the ones of
+`cubrid backupdb --level`: `level0` full, `level1` since the last full backup,
+`level2` since the last level 1. Only the levels that actually have a volume
+appear, so a database with a single full backup answers with `level0` alone.
+
+Every level holds objects with the following structure.
 
 | **Key** | **Description** |
 | --- | --- |
 | path | the full path of the backup volume |
-| size | the size of the backup volume, in bytes |
-| data | the moment the backup was taken, `YYYY.MM.DD.HHMM` |
+| size | the size of the backup volume file, in bytes |
+| data | the last modification time of that file, `YYYY.MM.DD.HH.MM` |
+
+Two more things follow from how the answer is built
+(`ts_backupdb_info`, `cm_job_task.cpp:6256`).
+
+- The unit number of `_bkvinf` is not reported. Several volumes of the same
+  level are told apart by `path` only.
+- An entry whose file no longer exists is skipped without a word, so a stale
+  `_bkvinf` line simply does not show up.
+
+When the database has never been backed up there is no `_bkvinf` file at all,
+and the answer carries `dbdir` and `freespace` only:
+
+```
+{
+   "__EXEC_TIME" : "25 ms",
+   "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/backup",
+   "freespace" : "501072",
+   "note" : "none",
+   "status" : "success",
+   "task" : "backupdbinfo"
+}
+```
 
 ## Response Sample
 
 ```
 {
-   "__EXEC_TIME" : "29 ms",
+   "__EXEC_TIME" : "25 ms",
    "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/backup",
-   "freespace" : "446128",
+   "freespace" : "445672",
    "level0" : [
       {
-         "data" : "2026.08.18.07.40",
+         "data" : "2026.08.18.09.08",
          "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/alatestdb/backup/alatestdb_backup_lv0/alatestdb_bk0v000",
          "size" : "2110464"
       }

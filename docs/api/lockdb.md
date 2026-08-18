@@ -62,7 +62,7 @@ objects which the `cubrid lockdb` utility reports.
 
 ```
 {
-   "__EXEC_TIME" : "59 ms",
+   "__EXEC_TIME" : "60 ms",
    "lockinfo" : [
       {
          "dinterval" : "1.00",
@@ -90,7 +90,7 @@ objects which the `cubrid lockdb` utility reports.
                "host" : "ai-work-49",
                "index" : "1",
                "isolevel" : "COMMITTED READ",
-               "pid" : "1874583",
+               "pid" : "1997884",
                "pname" : "lockdb",
                "timeout" : ":"
             }

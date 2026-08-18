@@ -67,6 +67,6 @@ cas_mon is composed of objects with following structure
    "note" : "none",
    "status" : "success",
    "task" : "getbrokerdiagdata",
-   "time" : "2026/08/18 07:41:10"
+   "time" : "2026/08/18 09:08:47"
 }
 ```

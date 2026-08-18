@@ -1,7 +1,9 @@
 # getfolderswithkeyword
 
-Get the sub folders of a folder. On Linux the `keyword` is matched as a sub string of the
-folder name, on Windows it is used as a file search pattern, so wildcards such as `*` can be used.
+Get the sub folders of a folder. `keyword` is a shell style pattern, not a sub string:
+Linux matches it with `fnmatch()`, Windows passes it to `FindFirstFile()`. A bare `demo`
+therefore only matches a folder named exactly `demo`; use `*demo*` to match by sub string.
+Folders that do not match are left out, and when nothing matches `folders` is `null`.
 
 ## Request JSON Syntax
 
@@ -10,7 +12,7 @@ folder name, on Windows it is used as a file search pattern, so wildcards such a
 | task | task name |
 | token | token string encrypted. |
 | search_folder | the full path of the folder to be searched |
-| keyword | the keyword the sub folder name must contain |
+| keyword | the pattern the sub folder name has to match, `*` and `?` allowed |
 
 ## Request Sample
 
@@ -19,7 +21,7 @@ folder name, on Windows it is used as a file search pattern, so wildcards such a
   "task": "getfolderswithkeyword",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
   "search_folder": "$CUBRID_DATABASES",
-  "keyword": "demo"
+  "keyword": "*demo*"
 }
 ```
 
@@ -45,7 +47,11 @@ folders is composed of objects with following structure
 ```
 {
    "__EXEC_TIME" : "0 ms",
-   "folders" : null,
+   "folders" : [
+      {
+         "foldername" : "test_result_folder"
+      }
+   ],
    "note" : "none",
    "status" : "success",
    "task" : "getfolderswithkeyword"

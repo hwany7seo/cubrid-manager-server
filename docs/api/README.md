@@ -216,8 +216,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [getloginfo](getloginfo.md) | socket, http | ALL_AUTHORITY |
 | [viewlog/viewlog2](viewlogviewlog2.md) | socket, http | ALL_AUTHORITY |
 | [loadaccesslog](loadaccesslog.md) | socket, http | ALL_AUTHORITY |
-| [deleteaccesslog](deleteaccesslog.md) | - | - (no longer supported) |
-| [deleteerrorlog](deleteerrorlog.md) | - | - (no longer supported) |
 | [getautobackupdberrlog](getautobackupdberrlog.md) | socket, http | ALL_AUTHORITY |
 | [getautoexecqueryerrlog](getautoexecqueryerrlog.md) | socket, http | ALL_AUTHORITY |
 | [getautoaddvollog](getautoaddvollog.md) | socket, http | ALL_AUTHORITY |

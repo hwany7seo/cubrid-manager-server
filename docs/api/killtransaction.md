@@ -68,11 +68,27 @@ other letters should cause an error. 
 
 ```
 {
-   "__EXEC_TIME" : "1102 ms",
+   "__EXEC_TIME" : "1106 ms",
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
    "task" : "killtransaction",
-   "transactioninfo" : null
+   "transactioninfo" : [
+      {
+         "transaction" : [
+            {
+               "@user" : "DBA",
+               "SQL_ID" : "empty",
+               "host" : "ai-work-49",
+               "pid" : "1997471",
+               "program" : "csql",
+               "query_time" : "0.00",
+               "tran_time" : "8.60",
+               "tranindex" : "2(ACTIVE)",
+               "wait_for_lock_holder" : "-1"
+            }
+         ]
+      }
+   ]
 }
 ```

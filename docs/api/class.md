@@ -97,4 +97,4 @@ The class interface will get summary database class information.
 }
 ```
 
-> Lists are shortened to 2 entries here; the real response returned up to 5.
+> Lists are shortened to 2 entries here.
