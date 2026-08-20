@@ -89,4 +89,4 @@ accesslog and errorlog are composed of objects with following structure
 }
 ```
 
-> Lists are shortened to 3 entries here; the real response returned up to 2705.
+> Lists are shortened to 3 entries here.

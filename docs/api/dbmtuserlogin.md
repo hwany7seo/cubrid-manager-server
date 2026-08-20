@@ -42,11 +42,12 @@ The dbmtuserlogin interface will create a session to be accessed by a manager us
 ```
 {
    "@targetid" : "admin",
-   "__EXEC_TIME" : "52 ms",
+   "__EXEC_TIME" : "38 ms",
    "authority" : "isdba",
-   "dbname" : "demodb",
+   "dbname" : "ha_test",
    "note" : "none",
    "status" : "success",
    "task" : "dbmtuserlogin"
 }
+
 ```

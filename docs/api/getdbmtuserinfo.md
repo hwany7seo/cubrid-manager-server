@@ -52,9 +52,6 @@ userlist is composed of `user` objects with following structure
 | @dbid | the database user id used to connect to that database |
 | dbbrokeraddress | the address of the broker used to connect to that database |
 
-[getdbmtuserinfo_new](getdbmtuserinfo_new.md) returns the same information with the authorities
-given as a structured authority list.
-
 ## Response Sample
 
 ```

@@ -48,28 +48,6 @@ Every level holds objects with the following structure.
 | size | the size of the backup volume file, in bytes |
 | data | the last modification time of that file, `YYYY.MM.DD.HH.MM` |
 
-Two more things follow from how the answer is built
-(`ts_backupdb_info`, `cm_job_task.cpp:6256`).
-
-- The unit number of `_bkvinf` is not reported. Several volumes of the same
-  level are told apart by `path` only.
-- An entry whose file no longer exists is skipped without a word, so a stale
-  `_bkvinf` line simply does not show up.
-
-When the database has never been backed up there is no `_bkvinf` file at all,
-and the answer carries `dbdir` and `freespace` only:
-
-```
-{
-   "__EXEC_TIME" : "25 ms",
-   "dbdir" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/databases/demodb/backup",
-   "freespace" : "501072",
-   "note" : "none",
-   "status" : "success",
-   "task" : "backupdbinfo"
-}
-```
-
 ## Response Sample
 
 ```

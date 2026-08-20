@@ -114,4 +114,4 @@ When the broker is running (`brokerstatus` is `ON`), each broker also carries it
 }
 ```
 
-> Lists are shortened to 1 entry here; the real response returned up to 2.
+> Lists are shortened to 1 entry here.

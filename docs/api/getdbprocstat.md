@@ -46,14 +46,14 @@ dbstat is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "27 ms",
+   "__EXEC_TIME" : "13 ms",
    "dbstat" : [
       {
-         "cpu_kernel" : "50",
-         "cpu_user" : "29",
-         "dbname" : "demodb",
-         "mem_physical" : "523247616",
-         "mem_virtual" : "5842227200"
+         "cpu_kernel" : "165147",
+         "cpu_user" : "162071",
+         "dbname" : "ha_test",
+         "mem_physical" : "549388288",
+         "mem_virtual" : "2784587776"
       }
    ],
    "note" : "none",

@@ -52,32 +52,33 @@ Get logfile info.
 ## Response Sample
 
 ```
+
 {
-   "__EXEC_TIME" : "2 ms",
+   "__EXEC_TIME" : "1 ms",
    "broker" : "query_editor",
    "from" : "",
    "logfileinfo" : [
       {
          "logfile" : [
             {
-               "lastupdate" : "2026.08.18",
+               "lastupdate" : "2025.06.09",
                "owner" : "cubrid",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/error_log/query_editor_1.err",
-               "size" : "329",
+               "path" : "/home/cubrid/CUBRID-11.4.0.1781-6b2bc75-Linux.x86_64/log/broker/error_log/query_editor_1.err",
+               "size" : "9834",
                "type" : "error"
             },
             {
-               "lastupdate" : "2026.08.18",
+               "lastupdate" : "2025.06.09",
                "owner" : "cubrid",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/sql_log/query_editor_1.sql.log",
-               "size" : "7087",
+               "path" : "/home/cubrid/CUBRID-11.4.0.1781-6b2bc75-Linux.x86_64/log/broker/sql_log/query_editor_5.slow.log",
+               "size" : "0",
                "type" : "script"
             },
             {
-               "lastupdate" : "2026.08.14",
+               "lastupdate" : "2025.06.09",
                "owner" : "cubrid",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/broker/sql_log/query_editor_1.slow.log",
-               "size" : "0",
+               "path" : "/home/cubrid/CUBRID-11.4.0.1781-6b2bc75-Linux.x86_64/log/broker/sql_log/query_editor_1.sql.log",
+               "size" : "9711",
                "type" : "script"
             }
          ]
@@ -87,6 +88,5 @@ Get logfile info.
    "status" : "success",
    "task" : "getlogfileinfo"
 }
-```
 
-> Lists are shortened to 3 entries here; the real response returned up to 11.
+```

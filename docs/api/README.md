@@ -79,8 +79,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [broker_restart](broker_restart.md) | socket, http | DBC, DBO, BRK |
 | [getbrokerdiagdata](getbrokerdiagdata.md) | socket, http | ALL_AUTHORITY |
 | [getbrokersinfo](getbrokersinfo.md) | socket, http | ALL_AUTHORITY |
-| [getinitbrokersinfo](getinitbrokersinfo.md) | socket, http | ALL_AUTHORITY |
-| [broker_changer](broker_changer.md) | socket, http | DBC, DBO, BRK |
 
 ### DB
 
@@ -105,7 +103,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [startinfo](startinfo.md) | socket, http | ALL_AUTHORITY |
 | [getbackuplist](getbackuplist.md) | socket, http | ALL_AUTHORITY |
 | [getdbprocstat](getdbprocstat.md) | socket, http | ALL_AUTHORITY |
-| [changemode](changemode.md) | socket, http | DBC, DBO |
 | [getdbmode](getdbmode.md) | socket, http | ALL_AUTHORITY |
 | [addvoldb](addvoldb.md) | socket, http | DBC, DBO |
 | [class](class.md) | socket, http | ALL_AUTHORITY |
@@ -114,8 +111,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [stop_statdump](stop_statdump.md) | socket, http | ALL_AUTHORITY |
 | [unloadinfo](unloadinfo.md) | socket, http | ALL_AUTHORITY |
 | [dbspace](dbspace.md) | socket, http | ALL_AUTHORITY |
-| [runsqlstatement](runsqlstatement.md) | socket, http | ALL_AUTHORITY |
-| [updateattribute](updateattribute.md) | socket, http | ALL_AUTHORITY |
 
 ### DB User
 
@@ -138,9 +133,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [adddbmtuser](adddbmtuser.md) | socket, http | DBC |
 | [getaddvolstatus](getaddvolstatus.md) | socket, http | ALL_AUTHORITY |
 | [dbmtuserlogin](dbmtuserlogin.md) | socket, http | ALL_AUTHORITY |
-| [adddbmtuser_new](adddbmtuser_new.md) | http | DBC |
-| [updatedbmtuser_new](updatedbmtuser_new.md) | http | DBC, DBO |
-| [getdbmtuserinfo_new](getdbmtuserinfo_new.md) | http | DBC, DBO |
 
 ### Transaction
 
@@ -171,13 +163,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [setautoaddvol](setautoaddvol.md) | socket, http | DBC, DBO |
 | [getautoexecquery](getautoexecquery.md) | socket, http | ALL_AUTHORITY |
 | [setautoexecquery](setautoexecquery.md) | socket, http | DBC, DBO, JOB |
-| [getautostart](getautostart.md) | http | ALL_AUTHORITY |
-| [setautostart](setautostart.md) | http | DBC, DBO, JOB |
-| [execautostart](execautostart.md) | http | ALL_AUTHORITY |
-| [getautojobconf](getautojobconf.md) | http | ALL_AUTHORITY |
-| [setautojobconf](setautojobconf.md) | http | DBC, DBO, JOB |
-| [automail](automail.md) | http | DBC, DBO, MON |
-| [sendmail](sendmail.md) | http | ALL_AUTHORITY |
 
 ### HA
 
@@ -190,8 +175,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [ha_start](ha_start.md) | socket, http | DBC, DBO |
 | [ha_stop](ha_stop.md) | socket, http | DBC, DBO |
 | [gethaapplyinfo](gethaapplyinfo.md) | http | ALL_AUTHORITY |
-| [ha_copylogdb](ha_copylogdb.md) | socket, http | DBC, DBO |
-| [ha_applylogdb](ha_applylogdb.md) | socket, http | DBC, DBO |
 
 ### Monitoring
 
@@ -199,15 +182,10 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | --- | --- | --- | --- |
 | [get_mon_interval](get_mon_interval.md) | http | MON |
 | [set_mon_interval](set_mon_interval.md) | http | ADMIN |
-| [get_mon_statistic](get_mon_statistic.md) | http | MON |
-| [monitorprocess](monitorprocess.md) | socket, http | ALL_AUTHORITY |
 | [gethoststat](gethoststat.md) | socket, http | ALL_AUTHORITY |
-| [getprocstat](getprocstat.md) | http | ALL_AUTHORITY |
-| [getsysdiskinfo](getsysdiskinfo.md) | http | ALL_AUTHORITY |
 | [addstatustemplate](addstatustemplate.md) | socket, http | DBC, DBO, MON |
 | [updatestatustemplate](updatestatustemplate.md) | socket, http | DBC, DBO, MON |
 | [removestatustemplate](removestatustemplate.md) | socket, http | DBC, DBO, MON |
-| [getstatustemplate](getstatustemplate.md) | socket, http | ALL_AUTHORITY |
 
 ### Log
 
@@ -223,22 +201,15 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [getlogfileinfo](getlogfileinfo.md) | socket, http | ALL_AUTHORITY |
 | [analyzecaslog](analyzecaslog.md) | socket, http | ALL_AUTHORITY |
 | [getcaslogtopresult](getcaslogtopresult.md) | socket, http | ALL_AUTHORITY |
-| [getaccesslogfiles](getaccesslogfiles.md) | socket, http | ALL_AUTHORITY |
-| [geterrorlogfiles](geterrorlogfiles.md) | socket, http | ALL_AUTHORITY |
-| [getdberrorlog](getdberrorlog.md) | http | ALL_AUTHORITY |
-| [getbrokerlog](getbrokerlog.md) | http | ALL_AUTHORITY |
 | [resetlog](resetlog.md) | socket, http | DBC, DBO |
 | [removelog](removelog.md) | socket, http | ALL_AUTHORITY |
 | [errortrace](errortrace.md) | socket, http | ALL_AUTHORITY |
-| [getfiletotallinenum](getfiletotallinenum.md) | socket, http | ALL_AUTHORITY |
-| [setloglevel](setloglevel.md) | http | DBC, DBO, MON |
 
 ### Shard
 
 | **Interface Name** | **Connection Type** | **Permission** | **Support Version** |
 | --- | --- | --- | --- |
 | [getshardinfo](getshardinfo.md) | socket, http | ALL_AUTHORITY |
-| [getshardstatus](getshardstatus.md) | socket, http | ALL_AUTHORITY |
 
 ### Others
 
@@ -251,7 +222,6 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [statdump](statdump.md) | socket, http | ALL_AUTHORITY |
 | [backupvolinfo](backupvolinfo.md) | socket, http | ALL_AUTHORITY |
 | [getdiagdata](getdiagdata.md) | socket, http | ALL_AUTHORITY |
-| [getstandbyserverstat](getstandbyserverstat.md) | socket, http | ALL_AUTHORITY |
 | [login](login.md) | socket, http | ALL_AUTHORITY |
 | [logout](logout.md) | socket, http | ALL_AUTHORITY |
 | [getcmsenv](getcmsenv.md) | socket, http | ALL_AUTHORITY |
@@ -259,13 +229,8 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | [shard_stop](shard_stop.md) | socket, http | DBC, DBO, BRK |
 | [executecasrunner](executecasrunner.md) | socket, http | DBC, DBO, BRK, MON |
 | [removecasrunnertmpfile](removecasrunnertmpfile.md) | socket, http | DBC, DBO, BRK, MON |
-| [kill_process](kill_process.md) | socket, http | DBC, DBO |
-| [keepalive](keepalive.md) | socket, http | ALL_AUTHORITY |
 | [getenv](getenv.md) | socket, http | ALL_AUTHORITY |
-| [getenvvarbyname](getenvvarbyname.md) | socket, http | ALL_AUTHORITY |
 | [generatecert](generatecert.md) | socket, http | ALL_AUTHORITY |
-| [autoupdate](autoupdate.md) | socket, http | ADMIN |
-| [isupdatesuccess](isupdatesuccess.md) | socket, http | ADMIN |
 
 ### File and Directory
 
@@ -273,12 +238,4 @@ CMS Interfaces are composed by JSON and is used for communication between CMS an
 | --- | --- | --- | --- |
 | [checkdir](checkdir.md) | socket, http | ALL_AUTHORITY |
 | [checkfile](checkfile.md) | socket, http | ALL_AUTHORITY |
-| [list_dir](list_dir.md) | socket, http | ALL_AUTHORITY |
-| [copyfolder](copyfolder.md) | socket, http | DBC, DBO |
-| [deletefolder](deletefolder.md) | socket, http | DBC, DBO |
-| [getfolderswithkeyword](getfolderswithkeyword.md) | socket, http | ALL_AUTHORITY |
 | [removefiles](removefiles.md) | socket, http | DBC, DBO |
-| [runscript](runscript.md) | socket, http | ALL_AUTHORITY |
-| [writeandsaveconf](writeandsaveconf.md) | socket, http | DBC, DBO |
-| [readprivatedata](readprivatedata.md) | http | ALL_AUTHORITY |
-| [writeprivatedata](writeprivatedata.md) | http | DBC, DBO, BRK |

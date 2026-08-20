@@ -32,8 +32,8 @@ Set the monitoring statistic interval
 
 ```
 {
-   "note" : "none",
-   "status" : "success",
-   "task" : "set_mon_interval"
+  "task": "set_mon_interval",
+  "status": "success",
+  "note": "none"
 }
 ```

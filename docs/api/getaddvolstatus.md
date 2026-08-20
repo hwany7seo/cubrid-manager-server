@@ -33,8 +33,8 @@ Get volume status.
 
 ```
 {
-   "__EXEC_TIME" : "0 ms",
-   "freespace" : "445600",
+   "__EXEC_TIME" : "1 ms",
+   "freespace" : "450720",
    "note" : "none",
    "status" : "success",
    "task" : "getaddvolstatus",

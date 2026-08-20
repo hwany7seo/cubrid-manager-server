@@ -27,7 +27,6 @@ The unloaddb interface will unload a database server.
 | lofile | lo file COUNT per a directory; default: 0 |
 | dbuser | database user id |
 | dbpasswd | the password of the database user |
-| cach | NUMBER of cached pages; default: 100 |
 
 ## Request Sample
 

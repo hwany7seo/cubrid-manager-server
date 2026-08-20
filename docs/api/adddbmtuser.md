@@ -11,7 +11,6 @@ The adddbmtuser interface will create a new database manager user.
 | targetid | user name |
 | password | user password |
 | dbauth | a list of databases which is taken in charge by this user |
-| authoritylist | the authorities granted to this user, including dbo,brk,mon,job,var,dbc and admin. Its contents are only read by [adddbmtuser_new](adddbmtuser_new.md); this interface takes the authorities from `casauth`, `dbcreate` and `statusmonitorauth` |
 | casauth | the broker authority of the CM user |
 | dbcreate | the database creation authority of the CM user |
 | statusmonitorauth | the monitoring authority of the CM user |
@@ -33,30 +32,19 @@ dbauth is composed of objects with following structure
 {
   "task": "adddbmtuser",
   "token": "...",
-  "password": "1234567",
-  "targetid": "hqy_admin280",
+  "targetid": "monitor1",
+  "password": "1111",
   "dbauth": [
     {
-      "dbname": "db_3",
+      "dbname": "demodb",
       "dbid": "dba",
       "dbpassword": "",
-      "dbbrokeraddress": "localhost, 33000"
-    },
-    {
-      "dbname": "db_5",
-      "dbid": "dba",
-      "dbpassword": "",
-      "dbbrokeraddress": "localhost, 33000"
+      "dbbrokeraddress": "localhost,33000"
     }
   ],
-  "authoritylist": {
-    "dbc": "yes",
-    "dbo": "no",
-    "brk": "no",
-    "mon": "no",
-    "job": "no",
-    "var": "yes"
-  }
+  "casauth": "admin",
+  "dbcreate": "none",
+  "statusmonitorauth": "admin"
 }
 ```
 

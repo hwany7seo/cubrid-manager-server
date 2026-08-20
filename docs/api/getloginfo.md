@@ -45,30 +45,77 @@ log is composed of objects with following structure
 
 ```
 {
-   "__EXEC_TIME" : "0 ms",
-   "dbname" : "demodb",
-   "loginfo" : [
+   "__EXEC_TIME" : "39 ms",
+   "dbname" : "testdb",
+   "loginfo" : 
       {
          "log" : [
             {
-               "@owner" : "cubrid",
-               "lastupdate" : "2026.08.14",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/server/demodb_20260814_1250.err",
-               "size" : "567156"
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.07",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130107_1419.err",
+               "size" : "0"
             },
             {
-               "@owner" : "cubrid",
-               "lastupdate" : "2026.08.18",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/server/demodb_latest.err",
-               "size" : "6695"
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.31",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130131_1823.err",
+               "size" : "0"
             },
             {
-               "@owner" : "cubrid",
-               "lastupdate" : "2026.08.14",
-               "path" : "/home/cubrid/CUBRID-11.5.0.2441-6ba9522-Linux.x86_64/log/server/demodb_20260814_1513.err",
-               "size" : "12239"
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.07",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130107_1453.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.15",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130115_1028.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.10",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130110_1528.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.05",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130105_1628.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.05",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130105_1140.err",
+               "size" : "9629"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.10",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130110_1526.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.05",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130105_1525.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.07",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130107_1350.err",
+               "size" : "0"
+            },
+            {
+               "@owner" : "huangqiyu",
+               "lastupdate" : "2013.01.11",
+               "path" : "/home/huangqiyu/cubrid_8.4.3/log/server/testdb_20130111_1453.err",
+               "size" : "0"
             }
-         ]
       }
    ],
    "note" : "none",
@@ -76,5 +123,3 @@ log is composed of objects with following structure
    "task" : "getloginfo"
 }
 ```
-
-> Lists are shortened to 3 entries here; the real response returned up to 18.

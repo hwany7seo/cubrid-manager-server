@@ -23,7 +23,8 @@ HELPER_PID_FILE = "log/helper_pids"
 # so that a half finished run does not break the next one. "demodb" is not in
 # here on purpose, the tests only read it.
 TEST_DBS = ("alatestdb", "compactdbtest", "destinationdb", "anotherdb",
-            "copydb", "destinationdb1", "renameadvdb", "renamedadvdb")
+            "copydb", "destinationdb1", "renameadvdb", "renamedadvdb",
+            "optionaldb")
 
 
 def findport():
@@ -568,6 +569,20 @@ def restart_services():
     wait_for_manager()
 
 
+def stop_services():
+    """Leave the host with the service down, the way the run found it.
+
+    restart_services() brings the whole service up at the start, so a finished
+    run would otherwise leave cub_manager, the brokers and cub_server demodb
+    behind on a machine that was idle before. Runs from the finally block, so a
+    failed or interrupted run stops them too.
+    """
+    cubrid_bin = os.path.join(os.environ["CUBRID"], "bin", "cubrid")
+    print("stopping the CUBRID service ...")
+    subprocess.call([cubrid_bin, "service", "stop"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def init_env():
     response = do_one_job("login", TEST_CASE_DIR + "login.txt", "")
     if response["status"] == "failure":
@@ -612,6 +627,7 @@ try:
     do_all_jobs(token)
 finally:
     clean_env()
+    stop_services()
 
 xmlfile = os.environ.get("TEST_XML")
 if xmlfile:

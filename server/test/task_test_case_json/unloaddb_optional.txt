@@ -10,8 +10,11 @@
 "classonly":"no",
 "delimit":"no",
 "estimate":"none",
-"prefix":"none",
+"prefix":"test_unloaddb_opt",
 "cach":"none",
 "lofile":"none",
+"as-dba":"yes",
+"skip-index-detail":"yes",
+"split-schema-files":"yes",
 "dbuser":"dba",
 "dbpasswd":""}

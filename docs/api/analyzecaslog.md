@@ -12,16 +12,6 @@ The analyzecaslog interface will fetch a top list to parse broker SQL log(s) wit
 | logfile | the full path of a broker SQL log file |
 | option_t | yes or no, analyze the log by transaction |
 
-The log has to contain executed queries. `broker_log_top` writes an empty report
-for a log which only holds `CAS STARTED` / `CAS TERMINATED` lines, and the answer
-is then `"resultlist": null`.
-
-**Only the first entry of `logfilelist` is analyzed.** The JSON layer turns every
-element of an array into its own `open`/`close` section
-(`json_to_nv`, `cm_server_interface.cpp:310`), while the handler reads a single
-section (`nv_locate`, `cm_job_task.cpp:9437`), so the second element onwards is
-dropped without any error. Analyze one log per request.
-
 ## Request Sample
 
 Analysis by transaction, `option_t` is `yes`:

@@ -62,8 +62,8 @@ lockdb
 backupdb
 backupdb_nulldir,failure
 backupdb_nullname,failure
-// "safereplication" was dropped in a2393c2 (it used to append a backticked
-// `repl_safe_page` command), so the key is now ignored and the backup succeeds.
+// "safereplication" was dropped in a2393c2 (it used to append a backticked `repl_safe_page` command), 
+// so the key is now ignored and the backup succeeds.
 backupdb_rep
 backupdbinfo
 
@@ -75,12 +75,21 @@ setbackupinfo
 setautoexecquery
 getautoexecquery
 getautoexecqueryerrlog
+getautoexecqueryerrlog_optional
 getautobackupdberrlog
+getautobackupdberrlog_optional
 deletebackupinfo
 
 optimizedb
 stopdb
 backupvolinfo
+// createdb_optional and loaddb_optional cover the optional parameters of
+// createdb and loaddb against a database of their own. loaddb_optional runs
+// with delete_orignal_files off so the loaddb case below still finds its input.
+createdb_optional
+loaddb_optional
+deletedb_for_optional
+
 loaddb
 restoredb
 
@@ -113,6 +122,7 @@ droptrigger
 
 getautoaddvol
 getautoaddvollog
+getautoaddvollog_optional
 getaddvolstatus
 setautoaddvol
 
@@ -142,6 +152,7 @@ createdb_for_renameadv
 renamedb_advanced
 deletedb_for_renameadv
 unloaddb
+unloaddb_optional
 unloaddb_nullname,failure
 unloaddb_nulltarget,failure
 unloaddb_nulltargetdir,failure
@@ -152,6 +163,7 @@ stopbroker
 startbroker
 getaddbrokerinfo
 getbrokerdiagdata
+getbrokerdiagdata_optional
 getbrokersinfo
 getbrokerstatus
 broker_stop
@@ -166,6 +178,7 @@ broker_restart_nullbroker,failure
 //broker_setparam,
 deletebroker
 executecasrunner
+executecasrunner_optional
 /* db api related tasks */
 class
 classinfo
@@ -236,6 +249,7 @@ setsysparam_nullconf,failure
 //setsysparam_cubridconf
 //broker_setparam
 getdiagdata
+getdiagdata_optional
 killprocess
 
 getenvvarbyname

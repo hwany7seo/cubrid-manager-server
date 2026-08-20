@@ -30,6 +30,7 @@ Get broker status.
 | bname | broker name |
 | time | the time the status was collected |
 | asinfo | cas' information |
+| as_c | the number of the current connections of the cas |
 | as_id | cas id |
 | as_pid | cas process id |
 | as_psize | cas process virtual memory size |
@@ -37,6 +38,7 @@ Get broker status.
 | as_cpu | cpu usage of cas process |
 | as_ctime | ctime of cas process |
 | as_lat | the last access time of cas process |
+| as_lct | the last connect time of the cas |
 | as_client_ip | client ip address |
 | as_cur | N/A |
 | as_dbhost | server host name |
@@ -46,8 +48,6 @@ Get broker status.
 | as_long_tran | the number of complicated transactions |
 | as_num_query | the number of queries |
 | as_num_tran | the number of transactions |
-| as_c | the number of the current connections of the cas |
-| as_lct | the last connect time of the cas |
 | as_port | the port of the application server. It is returned on Windows only |
 | jobinfo | the list of the jobs waiting in the queue of the broker. It is returned only when the queue is not empty |
 
@@ -65,9 +65,9 @@ jobinfo is composed of objects with following structure
 
 ## Response Sample
 
-```
+```json
 {
-   "__EXEC_TIME" : "2 ms",
+   "__EXEC_TIME" : "51 ms",
    "asinfo" : [
       {
          "as_c" : "0",
@@ -79,14 +79,14 @@ jobinfo is composed of objects with following structure
          "as_dbname" : "",
          "as_error_query" : "0",
          "as_id" : "1",
-         "as_lat" : "2026/08/18 09:08:46",
+         "as_lat" : "2013/02/01 15:30:23",
          "as_lct" : "",
          "as_long_query" : "0",
          "as_long_tran" : "0",
          "as_num_query" : "0",
          "as_num_tran" : "0",
-         "as_pid" : "1998370",
-         "as_psize" : "6412",
+         "as_pid" : "2263",
+         "as_psize" : "25532",
          "as_status" : "IDLE"
       },
       {
@@ -99,14 +99,74 @@ jobinfo is composed of objects with following structure
          "as_dbname" : "",
          "as_error_query" : "0",
          "as_id" : "2",
-         "as_lat" : "2026/08/18 09:08:46",
+         "as_lat" : "2013/02/01 15:30:23",
          "as_lct" : "",
          "as_long_query" : "0",
          "as_long_tran" : "0",
          "as_num_query" : "0",
          "as_num_tran" : "0",
-         "as_pid" : "1998371",
-         "as_psize" : "6412",
+         "as_pid" : "2264",
+         "as_psize" : "25532",
+         "as_status" : "IDLE"
+      },
+      {
+         "as_c" : "0",
+         "as_client_ip" : "0.0.0.0",
+         "as_cpu" : "0.00",
+         "as_ctime" : "0:00",
+         "as_cur" : "",
+         "as_dbhost" : "",
+         "as_dbname" : "",
+         "as_error_query" : "0",
+         "as_id" : "3",
+         "as_lat" : "2013/02/01 15:30:23",
+         "as_lct" : "",
+         "as_long_query" : "0",
+         "as_long_tran" : "0",
+         "as_num_query" : "0",
+         "as_num_tran" : "0",
+         "as_pid" : "2265",
+         "as_psize" : "25532",
+         "as_status" : "IDLE"
+      },
+      {
+         "as_c" : "0",
+         "as_client_ip" : "0.0.0.0",
+         "as_cpu" : "0.00",
+         "as_ctime" : "0:00",
+         "as_cur" : "",
+         "as_dbhost" : "",
+         "as_dbname" : "",
+         "as_error_query" : "0",
+         "as_id" : "4",
+         "as_lat" : "2013/02/01 15:30:23",
+         "as_lct" : "",
+         "as_long_query" : "0",
+         "as_long_tran" : "0",
+         "as_num_query" : "0",
+         "as_num_tran" : "0",
+         "as_pid" : "2266",
+         "as_psize" : "25532",
+         "as_status" : "IDLE"
+      },
+      {
+         "as_c" : "0",
+         "as_client_ip" : "0.0.0.0",
+         "as_cpu" : "0.00",
+         "as_ctime" : "0:00",
+         "as_cur" : "",
+         "as_dbhost" : "",
+         "as_dbname" : "",
+         "as_error_query" : "0",
+         "as_id" : "5",
+         "as_lat" : "2013/02/01 15:30:23",
+         "as_lct" : "",
+         "as_long_query" : "0",
+         "as_long_tran" : "0",
+         "as_num_query" : "0",
+         "as_num_tran" : "0",
+         "as_pid" : "2267",
+         "as_psize" : "25532",
          "as_status" : "IDLE"
       }
    ],
@@ -114,8 +174,6 @@ jobinfo is composed of objects with following structure
    "note" : "none",
    "status" : "success",
    "task" : "getbrokerstatus",
-   "time" : "2026/08/18 09:08:47"
+   "time" : "2013/02/01 15:41:08"
 }
 ```
-
-> Lists are shortened to 2 entries here; the real response returned up to 5.

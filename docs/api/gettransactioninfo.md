@@ -9,8 +9,6 @@ The gettransactioninfo interface fetches database transaction information.
 | task | task name |
 | token | token string encrypted. |
 | dbname | database name |
-| dbuser | database username |
-| dbpasswd | password for dbuser |
 
 ## Request Sample
 
@@ -18,9 +16,7 @@ The gettransactioninfo interface fetches database transaction information.
 {
   "task": "gettransactioninfo",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
-  "dbname": "demodb",
-  "dbuser": "dba",
-  "dbpasswd": ""
+  "dbname": "demodb"
 }
 ```
 
@@ -49,7 +45,7 @@ The gettransactioninfo interface fetches database transaction information.
 
 ```json
 {
-   "__EXEC_TIME" : "50 ms",
+   "__EXEC_TIME" : "49 ms",
    "dbname" : "demodb",
    "note" : "none",
    "status" : "success",
@@ -61,10 +57,10 @@ The gettransactioninfo interface fetches database transaction information.
                "@user" : "DBA",
                "SQL_ID" : "empty",
                "host" : "ai-work-49",
-               "pid" : "1997470",
+               "pid" : "2381237",
                "program" : "csql",
                "query_time" : "0.00",
-               "tran_time" : "7.40",
+               "tran_time" : "6.00",
                "tranindex" : "1(ACTIVE)",
                "wait_for_lock_holder" : "-1"
             },
@@ -72,10 +68,10 @@ The gettransactioninfo interface fetches database transaction information.
                "@user" : "DBA",
                "SQL_ID" : "empty",
                "host" : "ai-work-49",
-               "pid" : "1997471",
+               "pid" : "2381236",
                "program" : "csql",
                "query_time" : "0.00",
-               "tran_time" : "7.40",
+               "tran_time" : "6.00",
                "tranindex" : "2(ACTIVE)",
                "wait_for_lock_holder" : "-1"
             }

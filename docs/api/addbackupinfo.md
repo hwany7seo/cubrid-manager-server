@@ -22,6 +22,7 @@ Add a backup schedule.
 | updatestatus | on-off indicating whether to update statistic infromation |
 | check | on-off indicating whether to start consistency check |
 | mt | the number of auto-backup threads |
+| bknum | the number of backup files to keep. Optional, `1` is used when it is omitted |
 
 ## Request Sample
 
@@ -42,7 +43,8 @@ Add a backup schedule.
   "onoff": "ON",
   "zip": "y",
   "check": "y",
-  "mt": "2"
+  "mt": "2",
+  "bknum": "1"
 }
 ```
 

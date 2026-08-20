@@ -4,5 +4,4 @@
 "volname":"",
 "purpose":"generic",
 "path":"$CUBRID_DATABASES/alatestdb",
-"numberofpages":"100",
 "size_need_mb":"0.391(MB)"}

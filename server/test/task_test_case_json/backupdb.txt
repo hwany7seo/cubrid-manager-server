@@ -7,5 +7,4 @@
 "removelog":"n",
 "check":"y",
 "mt":"0",
-"zip":"y",
-"safereplication":"n"}
+"zip":"y"}
