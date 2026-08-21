@@ -16180,7 +16180,7 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 	    "CUBRID Manager server comment extension");
   _add_extensions (x509_local, NID_netscape_comment, nid_netscape_comment);
 
-  if (X509_sign (x509_local, pub_key, EVP_md5 ()) == 0)
+  if (X509_sign (x509_local, pub_key, EVP_sha256 ()) == 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot sign with public key.");
@@ -16317,8 +16317,6 @@ ts_generate_cert (nvplist *req, nvplist *res, char *_dbmt_error)
 
   keyfilepath[0] = '\0';
   crtfilepath[0] = '\0';
-
-  CRYPTO_mem_ctrl (CRYPTO_MEM_CHECK_ON);
 
   bio_err = BIO_new_fp (stderr, BIO_NOCLOSE);
 
@@ -16561,12 +16559,13 @@ find_statdumpd_info (char *dbname)
 static int
 _hash_cert (char *hash_value, char *file_path)
 {
-  MD5_CTX mdContext;
-  unsigned char data[RSA_KEY_SIZE];
-  unsigned char md5_final[MD5_DIGEST_LENGTH];
+  EVP_MD_CTX *mdContext = NULL;
+  unsigned char data[1024];	/* file read buffer */
+  unsigned char md5_final[EVP_MAX_MD_SIZE];
   char md5_final_hex[MD5_DIGEST_LENGTH];
+  unsigned int md5_len = 0;
   int bytes = 0;
-  int i = 0;
+  unsigned int i = 0;
   FILE *inFile = NULL;
 
   if ((inFile = fopen (file_path, "rb")) == NULL)
@@ -16574,29 +16573,57 @@ _hash_cert (char *hash_value, char *file_path)
       return 1;
     }
 
-  MD5_Init (&mdContext);
-
-  while ((bytes = (int) fread (data, 1, RSA_KEY_SIZE, inFile)) != 0)
+  if ((mdContext = EVP_MD_CTX_new ()) == NULL)
     {
-      MD5_Update (&mdContext, data, bytes);
+      fclose (inFile);
+      return 1;
     }
-  MD5_Final (md5_final, &mdContext);
+
+  if (EVP_DigestInit_ex (mdContext, EVP_md5 (), NULL) != 1)
+    {
+      EVP_MD_CTX_free (mdContext);
+      fclose (inFile);
+      return 1;
+    }
+
+  while ((bytes = (int) fread (data, 1, sizeof (data), inFile)) != 0)
+    {
+      if (EVP_DigestUpdate (mdContext, data, bytes) != 1)
+	{
+	  EVP_MD_CTX_free (mdContext);
+	  fclose (inFile);
+	  return 1;
+	}
+    }
+
+  if (EVP_DigestFinal_ex (mdContext, md5_final, &md5_len) != 1)
+    {
+      EVP_MD_CTX_free (mdContext);
+      fclose (inFile);
+      return 1;
+    }
+
+  EVP_MD_CTX_free (mdContext);
   fclose (inFile);
 
-  for (i = 0; i < MD5_DIGEST_LENGTH; i++)
+  for (i = 0; i < md5_len; i++)
     {
-      snprintf (md5_final_hex, 3, "%x", md5_final[i]);
+      snprintf (md5_final_hex, 3, "%02x", md5_final[i]);
       strncat (hash_value, md5_final_hex, 3);
     }
   return 0;
 }
+
+#ifndef CMS_DEFAULT_CERT_MD5
+#define CMS_DEFAULT_CERT_MD5 "4b0f669d5001f0cb4aca77ec71f4e2e2"
+#endif
+static const char *default_hash_file = CMS_DEFAULT_CERT_MD5;
 
 static int
 _is_default_cert (char *_dbmt_error)
 {
   char new_hash_value[33];
   char default_cert_path[PATH_MAX];
-  const char *default_hash_file = "df6a39a5565f858e40b6a7a3b0dee779";
   int compare_ret = 0;
 
   new_hash_value[0] = '\0';
@@ -16611,8 +16638,7 @@ _is_default_cert (char *_dbmt_error)
       return -1;
     }
 
-  compare_ret =
-	  strncmp (default_hash_file, new_hash_value, strlen (new_hash_value));
+  compare_ret = strcmp (default_hash_file, new_hash_value);
 
   if (compare_ret == 0)
     {
@@ -16626,7 +16652,6 @@ _is_exist_default_backup_cert (char *_dbmt_error)
 {
   char new_hash_value[33];
   char default_backup_cert_path[PATH_MAX];
-  const char *default_hash_file = "df6a39a5565f858e40b6a7a3b0dee779";
   int compare_ret = 0;
 
   new_hash_value[0] = '\0';
@@ -16650,8 +16675,7 @@ _is_exist_default_backup_cert (char *_dbmt_error)
       return -1;
     }
 
-  compare_ret =
-	  strncmp (default_hash_file, new_hash_value, strlen (new_hash_value));
+  compare_ret = strcmp (default_hash_file, new_hash_value);
 
   if (compare_ret == 0)
     {
