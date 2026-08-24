@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import ssl
 import subprocess
 import sys
@@ -13,7 +14,13 @@ import time
 from getpass import getpass
 
 DEFAULT_PORT = 8001
-TEST_CASE_DIR = "task_test_case_json/"
+# A test set is a list file plus the directory of cases it names:
+#   task_test_case/<set>.txt          the scenario, one case per line
+#   task_test_case/<set>/<case>       the request JSON of that case
+# The reports are named after the set as well, so two sets never overwrite each
+# other's output.
+TEST_CASE_ROOT = "task_test_case/"
+DEFAULT_TEST_SET = "task_status_check.txt"
 TEST_CONFIG_DIR = "task_test_config/"
 # Where start_kill_targets() records the processes it spawned, so that a run
 # killed before clean_env() can be cleaned up by the next one.
@@ -25,6 +32,124 @@ HELPER_PID_FILE = "log/helper_pids"
 TEST_DBS = ("alatestdb", "compactdbtest", "destinationdb", "anotherdb",
             "copydb", "destinationdb1", "renameadvdb", "renamedadvdb",
             "optionaldb")
+
+
+def resolve_test_set(listarg):
+    """Return (list path, case directory, report base name) for a test set.
+
+    The set is named by its list file. A bare name is looked up under
+    task_test_case/, so both "task_result_check.txt" and
+    "task_test_case/task_result_check.txt" work.
+    """
+    listpath = listarg
+    if not os.path.dirname(listpath):
+        listpath = os.path.join(TEST_CASE_ROOT.rstrip("/"), listpath)
+    base = os.path.basename(listpath)
+    if base.endswith(".txt"):
+        base = base[:-4]
+    return listpath, os.path.join(os.path.dirname(listpath), base), base
+
+
+def case_path(name):
+    return os.path.join(CASE_DIR, name)
+
+
+def parse_list_line(line):
+    """Split a scenario line into (case name, expected status, status only).
+
+    A line is either
+
+        <case>              compared against <case>.answer by --file-check
+        <case>,<status>      checked by its status field only
+
+    The comma form is what marks a case as status only: negative cases
+    (`userverify_fail,failure`) and cases whose response cannot have a stable
+    baseline (`loadaccesslog,success`). Those never get an .answer, and
+    --file-check judges them by the status they declare.
+    """
+    name, comma, expected = line.partition(",")
+    expected = expected.strip()
+    return name.strip(), (expected or "success"), bool(comma)
+
+
+# Values that differ on every run even when the server behaves identically:
+# process ids, elapsed times, cpu/memory samples, free space and the sizes of
+# log files the run itself writes to. --file-check replaces them so that the
+# comparison is about the shape and the stable content of the response.
+VOLATILE_KEYS = frozenset((
+    "pid", "as_pid", "as_psize", "as_lat",
+    "time", "tran_time", "tranindex",
+    "cpu_kernel", "cpu_user", "cpu_idle", "cpu_iowait",
+    "mem_physical", "mem_virtual", "mem_phy_free",
+    "free_size", "freespace", "size", "total",
+    "token",
+))
+
+# Timestamps and temporary file names are embedded in longer strings, so they
+# are masked by shape rather than by key.
+VOLATILE_PATTERNS = (
+    # Temporary files the server names with a counter and a clock, e.g.
+    # "$CUBRID/tmp/log_run_res_142_1787268395_295". Masked first: the
+    # timestamp patterns below would otherwise cut them in half.
+    (re.compile(r"((?:analyzelog_res|log_run_res2?|statustemplate_update"
+                r"|loaddb_err_tmp|DBMT_task[A-Za-z_]*)_)[0-9][0-9_]*"),
+     r"\1<tmpid>"),
+    # "Fri Aug 21 08:11:54 2026"
+    (re.compile(r"[A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4}"),
+     "<timestamp>"),
+    # "2026.08.21 08:12", "2026/08/21 08:12:27", "2026.08.21.08.12"
+    (re.compile(r"\d{4}[-./]\d{2}[-./]\d{2}[ T.]\d{2}[:.]\d{2}([:.]\d{2})?"),
+     "<timestamp>"),
+    # "demodb_20260821_0813.err"
+    (re.compile(r"\d{8}_\d{4}(?=\.)"), "<timestamp>"),
+    # "2026.08.21"
+    (re.compile(r"\d{4}[-./]\d{2}[-./]\d{2}"), "<date>"),
+    # "Last_lsa: 781|3000" -- the log position moves with every write
+    (re.compile(r"(_lsa(?: was)?:? )-?\d+\|-?\d+"), r"\1<lsa>"),
+)
+
+
+def normalize_response(body):
+    """Reduce a response to the part that must not change between runs.
+
+    The raw body carries values that differ on every run (elapsed times, pids,
+    the host name, absolute paths), so comparing it verbatim would fail even
+    when the server behaves identically. Those are dropped or put back into the
+    placeholder form the request used; everything else is compared as is.
+    """
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return body.strip() + "\n"
+
+    def walk(node):
+        if isinstance(node, dict):
+            out = {}
+            for key, value in node.items():
+                if key == "__EXEC_TIME":
+                    continue
+                out[key] = "<volatile>" if key in VOLATILE_KEYS else walk(value)
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str):
+            return mask_paths(node)
+        return node
+
+    text = json.dumps(walk(data), indent=3, sort_keys=True, ensure_ascii=False)
+    return text + "\n"
+
+
+def mask_paths(value):
+    """Put the run specific parts of a string into placeholder form."""
+    if CUBRID_DATABASES:
+        value = value.replace(str(CUBRID_DATABASES), "$CUBRID_DATABASES")
+    if CUBRID:
+        value = value.replace(str(CUBRID), "$CUBRID")
+    value = value.replace(HOSTNAME, "$HOSTNAME")
+    for pattern, placeholder in VOLATILE_PATTERNS:
+        value = pattern.sub(placeholder, value)
+    return value
 
 
 def findport():
@@ -107,7 +232,8 @@ def load_task(taskfile):
         return json.loads(replace_env_vars(task.read()))
 
 
-def record(name, casefile, task, status, note, expected, response=None):
+def record(name, casefile, task, status, note, expected, response=None,
+           quiet=False):
     """Log one result.
 
     Several cases share the same task name (renamedb, renamedb_adoff, ... all
@@ -119,7 +245,12 @@ def record(name, casefile, task, status, note, expected, response=None):
     """
     ok = (status == expected)
     results.append({"name": name, "file": casefile, "task": task, "ok": ok,
-                    "note": note, "response": response})
+                    "note": note, "response": response,
+                    "status": status, "expected": expected})
+    if quiet:
+        # --file-check reports one verdict per case, from the comparison; the
+        # per request status lines would only double every line of the log.
+        return ok
     label = "%s [%s]" % (name, task)
     if ok:
         print(label + " : " + '\033[32m{0}\033[0m'.format(status))
@@ -143,16 +274,39 @@ def send_one(name, req, token, expected="success", casefile=""):
         data = json.loads(body)
     except ValueError:
         record(name, casefile, task, "invalid",
-               "non JSON response: %s" % response[:200], expected, body)
+               "non JSON response: %s" % response[:200], expected, body,
+               quiet=file_check)
         return {"task": task, "status": "failure"}
     # The raw body is kept verbatim: docs/api/*.md quote the server's own
     # formatting, so a re-serialized copy would not be comparable.
     record(name, casefile, task, data.get("status"), data.get("note", ""),
-           expected, body)
+           expected, body, quiet=file_check)
     return data
 
 
-def do_one_job(name, taskfile, token, expected="success"):
+case_runs = {}
+
+
+def result_slot(taskfile):
+    """Answer/result base path for this occurrence of a case.
+
+    A case may be listed more than once (startinfo runs before and after the
+    databases the scenario creates), and the two runs answer differently. The
+    second occurrence gets its own baseline instead of overwriting the first.
+    """
+    seen = case_runs.get(taskfile, 0) + 1
+    case_runs[taskfile] = seen
+    return taskfile if seen == 1 else "%s.%d" % (taskfile, seen)
+
+
+def do_one_job(name, taskfile, token, expected="success", record_files=True,
+               status_only=False):
+    """Run one case: every request in it, then the answer handling.
+
+    `status_only` comes from the ",<status>" form in the scenario file. Such a
+    case is judged by its status field in every mode and never gets a baseline.
+    """
+    before = len(results)
     request = load_task(taskfile)
     if isinstance(request, list):
         for index, req in enumerate(request):
@@ -160,12 +314,100 @@ def do_one_job(name, taskfile, token, expected="success"):
                             taskfile)
     else:
         data = send_one(name, request, token, expected, taskfile)
+    # An array case sends several requests; its answer covers all of them, in
+    # order, so that the file is the record of the whole case.
+    entries = results[before:]
+    bodies = [r["response"] for r in entries if r.get("response") is not None]
+    text = "".join(normalize_response(b) for b in bodies)
+    task = entries[0].get("task", name) if entries else name
+    if record_files:
+        slot = result_slot(taskfile)
+        if status_only:
+            # The status verdict already recorded is the whole answer here.
+            if file_check:
+                report_status_only(name, entries)
+        elif file_check:
+            check_against_answer(name, slot, text, entries)
+        elif make_answer:
+            write_answer(slot, text)
     return data
 
 
+def write_answer(taskfile, text):
+    """Record the response of this run as the baseline for `--file-check`.
+
+    Only written with --answer. Regenerating a baseline is an explicit act: a
+    plain run would otherwise quietly adopt whatever the server answered today
+    as the thing to compare against tomorrow.
+    """
+    with open(taskfile + ".answer", "w") as out:
+        out.write(text)
+
+
+def check_against_answer(name, taskfile, text, entries):
+    """Compare this run against the stored baseline.
+
+    In --file-check mode the verdict of a case is the comparison, not the
+    status field: a case that answers "success" with different content is a
+    failure, and a negative case that keeps failing the same way passes.
+
+    A case that has no baseline is a failure: it is listed as one to compare,
+    so the missing file is a gap to fill with --answer, not something to pass
+    over quietly. Cases that cannot have a baseline say so in the scenario file
+    with the ",<status>" form instead.
+    """
+    answerfile = taskfile + ".answer"
+    if not os.path.isfile(answerfile):
+        del results[len(results) - len(entries):]
+        task = entries[0].get("task", name) if entries else name
+        note = "no %s; run with --answer once to create it" % answerfile
+        results.append({"name": name, "file": taskfile, "task": task,
+                        "ok": False, "note": note, "response": text})
+        print("%s [%s] : " % (name, task)
+              + '\033[31mfailed ({0})\033[0m'.format(note))
+        return
+    resultfile = taskfile + ".result"
+    with open(resultfile, "w") as out:
+        out.write(text)
+    with open(answerfile, "r") as f:
+        expected_txt = f.read()
+    ok = (expected_txt == text)
+    note = "" if ok else "differs from %s" % answerfile
+    # The requests of this case were already recorded by their status; replace
+    # them with the single verdict of the comparison.
+    del results[len(results) - len(entries):]
+    task = entries[0].get("task", name) if entries else name
+    results.append({"name": name, "file": taskfile, "task": task, "ok": ok,
+                    "note": note, "response": text})
+    label = "%s [%s]" % (name, task)
+    if ok:
+        print(label + " : " + '\033[32msuccess\033[0m')
+    else:
+        print(label + " : " + '\033[31mfailed ({0})\033[0m'.format(note))
+        print("    %s" % first_difference(expected_txt, text))
+
+
+def report_status_only(name, entries):
+    """Print the status verdict of a case the scenario marked as status only.
+
+    The per request lines were recorded quietly because --file-check normally
+    prints one verdict per case; for these they are the verdict, so they are
+    printed here.
+    """
+    for item in entries:
+        item["status_only"] = True
+        label = "%s [%s]" % (item["name"], item.get("task", name))
+        if item["ok"]:
+            print(label + " : " + '\033[32m{0}\033[0m (status only)'
+                  .format(item["status"]))
+        else:
+            print(label + " : "
+                  + '\033[31mexpected {0}, got {1} ({2})\033[0m'.format(
+                      item["expected"], item["status"], item["note"]))
+
+
 def do_all_jobs(token):
-    listfile = sys.argv[1] if len(sys.argv) > 1 else "task_list.txt"
-    with open(listfile, "r") as tasks:
+    with open(LIST_FILE, "r") as tasks:
         for line in tasks:
             line = line.rstrip()
             if line == "":
@@ -173,12 +415,21 @@ def do_all_jobs(token):
             if line[0] == '/':
                 print('\n\033[33m{0}\033[0m'.format(line))
                 continue
-            # "<test case>" runs a test that must succeed, "<test case>,failure"
-            # one that must be rejected by the server.
-            name, _, expected = line.partition(",")
-            expected = expected.strip() or "success"
-            do_one_job(name.strip(), TEST_CASE_DIR + name.strip() + ".txt",
-                       token, expected)
+            name, expected, status_only = parse_list_line(line)
+            do_one_job(name, case_path(name), token, expected,
+                       status_only=status_only)
+
+
+def first_difference(expected_txt, actual):
+    """Point at the first differing line, so the log says what moved."""
+    exp = expected_txt.split("\n")
+    got = actual.split("\n")
+    for i in range(max(len(exp), len(got))):
+        a = exp[i] if i < len(exp) else "<missing>"
+        b = got[i] if i < len(got) else "<missing>"
+        if a != b:
+            return "line %d: answer %s / result %s" % (i + 1, a.strip(), b.strip())
+    return "no line differs (trailing content only)"
 
 
 def dump_one(name, token):
@@ -187,7 +438,7 @@ def dump_one(name, token):
     Used to capture actual response values, e.g. to verify or update the API
     documentation. The stale token in the case file is replaced with `token`.
     """
-    request = load_task(TEST_CASE_DIR + name + ".txt")
+    request = load_task(case_path(name))
     reqs = request if isinstance(request, list) else [request]
     for req in reqs:
         req["token"] = token
@@ -584,9 +835,9 @@ def stop_services():
 
 
 def init_env():
-    response = do_one_job("login", TEST_CASE_DIR + "login.txt", "")
+    response = do_one_job("login", case_path("login"), "", record_files=False)
     if response["status"] == "failure":
-        request = load_task(TEST_CASE_DIR + "login.txt")
+        request = load_task(case_path("login"))
         request["password"] = getpass(
             "Please input the passwd for %s: " % (request["id"]))
         response = send_one("login", request, "")
@@ -594,16 +845,68 @@ def init_env():
             print("login failed, cannot run the tests.")
             sys.exit(1)
     token = response["token"]
-    response = do_one_job("getenv", TEST_CASE_DIR + "getenv.txt", token)
+    response = do_one_job("getenv", case_path("getenv"), token,
+                          record_files=False)
     return token, response["CUBRID"], response["CUBRID_DATABASES"]
 
 
-# `--dump <case> [<case> ...]` logs in and prints the raw response of each case
-# with the real token, instead of running the whole task list. It is a probe, so
-# it uses the server as it finds it and never restarts anything.
-dump_mode = len(sys.argv) > 1 and sys.argv[1] == "--dump"
+# Command line:
+#   test_tasks.py [<test set>] [-fc|--file-check]
+#   test_tasks.py --dump <case> [<case> ...]
+#
+# <test set> is the list file of the set to run, "task_status_check.txt" by
+# default. A bare name is looked up under task_test_case/.
+#
+# --file-check judges every case by comparing its response with the .answer
+# file stored next to the case, instead of by the status field.
+#
+# --answer regenerates those .answer files. Nothing else writes them: adopting
+# today's response as tomorrow's baseline has to be asked for.
+#
+# A case listed as "<case>,<status>" is status only in every mode -- it gets no
+# baseline and --file-check judges it by the status it declares.
+#
+# --dump logs in and prints the raw response of the named cases instead of
+# running a list. It is a probe, so it uses the server as it finds it and never
+# restarts anything.
+args = sys.argv[1:]
+dump_mode = bool(args) and args[0] == "--dump"
+file_check = False
+make_answer = False
+listarg = DEFAULT_TEST_SET
 
 if not dump_mode:
+    rest = []
+    for arg in args:
+        if arg in ("-fc", "--file-check"):
+            file_check = True
+        elif arg in ("-a", "--answer"):
+            make_answer = True
+        elif arg.startswith("-"):
+            print("unknown option: %s" % arg)
+            sys.exit(2)
+        else:
+            rest.append(arg)
+    if len(rest) > 1:
+        print("only one test set can be run at a time: %s" % " ".join(rest))
+        sys.exit(2)
+    if rest:
+        listarg = rest[0]
+    if file_check and make_answer:
+        print("--file-check compares against the baseline, --answer replaces "
+              "it; pick one")
+        sys.exit(2)
+
+LIST_FILE, CASE_DIR, REPORT_BASE = resolve_test_set(listarg)
+HOSTNAME = socket.gethostname()
+
+if not dump_mode:
+    if not os.path.isfile(LIST_FILE):
+        print("no such test set: %s" % LIST_FILE)
+        sys.exit(2)
+    if not os.path.isdir(CASE_DIR):
+        print("no case directory for the set: %s" % CASE_DIR)
+        sys.exit(2)
     restart_services()
 
 token, CUBRID, CUBRID_DATABASES = init_env()
@@ -611,7 +914,7 @@ token, CUBRID, CUBRID_DATABASES = init_env()
 results = []
 
 if dump_mode:
-    for name in sys.argv[2:]:
+    for name in args[1:]:
         print("===== %s =====" % name)
         dump_one(name, token)
     sys.exit(0)
@@ -629,10 +932,16 @@ finally:
     clean_env()
     stop_services()
 
-xmlfile = os.environ.get("TEST_XML")
-if xmlfile:
-    write_junit_xml(xmlfile)
-    write_junit_xml(detail_xml_path(xmlfile), with_response=True)
+# The reports are named after the test set, so running both sets leaves both
+# reports behind instead of one overwriting the other.
+xmlfile = os.path.join("log", REPORT_BASE + ".xml")
+write_junit_xml(xmlfile)
+write_junit_xml(detail_xml_path(xmlfile), with_response=True)
+
+nstatus = sum(1 for r in results if r.get("status_only"))
+if nstatus:
+    print("\n\033[33m%d request(s) are marked status only in %s.\033[0m"
+          % (nstatus, os.path.basename(LIST_FILE)))
 
 nfailed = sum(1 for r in results if not r["ok"])
 if nfailed:
