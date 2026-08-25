@@ -103,7 +103,7 @@ message(STATUS "CUBRID Manager server version: ${CMS_BUILD_NUMBER}")
 # build_cmake.sh (or passed by hand) and pointed at a build or install tree.
 if(CMS_STANDALONE)
   foreach(required CUBRID_INCLUDE_DIR CUBRID_LIB_DIR OPENSSL_INCLUDE_DIR OPENSSL_LIBRARIES)
-    if(NOT ${required})
+    if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
       message(FATAL_ERROR
         "${required} is not set. Run build_cmake.sh, or pass -D${required}=... pointing at a CUBRID build or installation.")
     endif()
