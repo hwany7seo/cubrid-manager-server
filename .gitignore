@@ -35,5 +35,5 @@ Makefile.in
 /server/lib/
 /server/include/
 
-## CMake build (server/build_cmake.sh)
-/server/build_cmake/
+## CMake build (server/build_cmake.sh), named build_<arch>_<mode> like the server's
+/server/build_*/
