@@ -670,6 +670,8 @@ def wait_for_mon_data(timeout=120):
 
 def build_env():
     """Create what the test cases expect to find on the host."""
+    # reset_leftovers() already did this with the paths from the environment;
+    # repeat it with the ones getenv reported, in case they are not the same.
     reset_test_dbs()
     # copydb_advance copies a database into this directory.
     dest = os.path.join(CUBRID_DATABASES, "destinationdb1")
@@ -709,7 +711,34 @@ def build_env():
 
 
 def clean_env():
+    """Remove what this run created. Runs from the finally block."""
     stop_kill_targets()
+    reset_test_dbs()
+
+
+def reset_leftovers():
+    """Do the end of run cleanup again, before this run starts.
+
+    clean_env() only runs when the run reaches its finally block; a run killed
+    with SIGKILL, or one that died on a service that would not come back, never
+    gets there and leaves its databases, its stray cub_server processes and its
+    helper processes behind. Repeating the work up front means a broken run
+    poisons at most itself.
+
+    It runs before restart_services() on purpose: a stray "cub_server <db>" has
+    to go before "cubrid service stop", not after, or the service comes back up
+    with it still holding volumes that are about to be deleted.
+
+    The paths come from the environment here, because the authoritative ones
+    are only known after getenv, which needs a server that is not up yet.
+    build_env() repeats reset_test_dbs() with those values in case the two
+    disagree.
+    """
+    global CUBRID, CUBRID_DATABASES
+    CUBRID = os.environ["CUBRID"]
+    CUBRID_DATABASES = os.environ["CUBRID_DATABASES"]
+    print("cleaning up after any earlier run ...")
+    sweep_stale_helpers()
     reset_test_dbs()
 
 
@@ -807,7 +836,6 @@ def restart_services():
     cubrid_home = os.environ["CUBRID"]
     cubrid_bin = os.path.join(cubrid_home, "bin", "cubrid")
     print("restarting the CUBRID service to start from a known state ...")
-    sweep_stale_helpers()
     subprocess.call([cubrid_bin, "service", "stop"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     reset_mon_data(cubrid_home)
@@ -907,6 +935,7 @@ if not dump_mode:
     if not os.path.isdir(CASE_DIR):
         print("no case directory for the set: %s" % CASE_DIR)
         sys.exit(2)
+    reset_leftovers()
     restart_services()
 
 token, CUBRID, CUBRID_DATABASES = init_env()
