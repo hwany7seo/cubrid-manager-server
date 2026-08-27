@@ -8,14 +8,34 @@ name: CMS API test
 # blocking instead, replace the "exit 0" at the end of the test step with
 # "exit $status" and mark this check as required in the branch protection
 # rules for develop.
+#
+# TRYING IT OUT IN A FORK
+#   The push trigger below runs the whole thing on any branch, but only when
+#   the repository is not CUBRID/cubrid-manager-server -- pushing a branch to
+#   the real repository must not start a three hour build. So in a fork it is
+#   enough to push the branch that carries this file.
+#
+#   To build against a fork of the engine as well, set the repository variable
+#   ENGINE_REPO (Settings > Secrets and variables > Actions > Variables) or
+#   pass engine_repo when running it by hand. It defaults to CUBRID/cubrid.
+#
+#   Nothing else is fork specific: the engine is public, so no token is needed,
+#   and the PR comment step is already allowed to fail where there is no write
+#   token.
 
 on:
   pull_request:
     branches: [develop]
+  push:
+    branches: ['**']
   workflow_dispatch:
     inputs:
+      engine_repo:
+        description: 'engine repository to build against'
+        default: CUBRID/cubrid
+        required: false
       engine_ref:
-        description: 'CUBRID/cubrid branch or tag to build against'
+        description: 'engine branch or tag to build against'
         default: develop
         required: false
 
@@ -28,12 +48,18 @@ permissions:
   pull-requests: write   # for the result comment
 
 env:
-  ENGINE_REPO: CUBRID/cubrid
-  ENGINE_REF: ${{ github.event.inputs.engine_ref || 'develop' }}
+  # inputs win, then the repository variable a fork can set, then the default
+  ENGINE_REPO: ${{ github.event.inputs.engine_repo || vars.ENGINE_REPO || 'CUBRID/cubrid' }}
+  ENGINE_REF: ${{ github.event.inputs.engine_ref || vars.ENGINE_REF || 'develop' }}
   TEST_SET: task_result_check.txt
 
 jobs:
   cms-api-test:
+    # A push only builds in a fork; in the real repository this runs on pull
+    # requests to develop and on demand.
+    if: >-
+      github.event_name != 'push' ||
+      github.repository != 'CUBRID/cubrid-manager-server'
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
