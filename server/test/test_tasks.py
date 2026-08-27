@@ -22,6 +22,14 @@ DEFAULT_PORT = 8001
 TEST_CASE_ROOT = "task_test_case/"
 DEFAULT_TEST_SET = "task_status_check.txt"
 TEST_CONFIG_DIR = "task_test_config/"
+
+# Baselines are per CUBRID version: the same request answers differently across
+# engines, so one .answer cannot cover them all. They live in a directory named
+# after the version, next to the cases:
+#   task_test_case/<set>/<version>/<case>.answer
+#   task_test_case/<set>/<version>/<case>.result
+KNOWN_VERSIONS = ("10_2", "11_0", "11_2", "11_4", "11_5")
+DEFAULT_VERSION = "11_4"
 # Where start_kill_targets() records the processes it spawned, so that a run
 # killed before clean_env() can be cleaned up by the next one.
 HELPER_PID_FILE = "log/helper_pids"
@@ -52,6 +60,23 @@ def resolve_test_set(listarg):
 
 def case_path(name):
     return os.path.join(CASE_DIR, name)
+
+
+def normalize_version(value):
+    """Accept "11.4" or "11_4" and return the directory form, "11_4"."""
+    text = value.strip().replace(".", "_")
+    if not re.match(r"^\d+_\d+$", text):
+        return None
+    return text
+
+
+def answer_dir():
+    return os.path.join(CASE_DIR, VERSION)
+
+
+def answer_base(slot):
+    """Path of the baseline pair for one case occurrence, minus the suffix."""
+    return os.path.join(answer_dir(), slot)
 
 
 def parse_list_line(line):
@@ -106,6 +131,11 @@ VOLATILE_PATTERNS = (
     (re.compile(r"\d{4}[-./]\d{2}[-./]\d{2}"), "<date>"),
     # "Last_lsa: 781|3000" -- the log position moves with every write
     (re.compile(r"(_lsa(?: was)?:? )-?\d+\|-?\d+"), r"\1<lsa>"),
+    # Aligned counter lines of a statistics dump, "Hits:            156".
+    # plandump is nothing but these, and they count everything the run did
+    # before reaching the case. Masking the number keeps the shape of the dump
+    # comparable -- a section that stops being reported is still caught.
+    (re.compile(r"^(\s*[A-Za-z][A-Za-z0-9_ ]*:[ \t]{2,})\d+$"), r"\1<count>"),
 )
 
 
@@ -287,16 +317,16 @@ def send_one(name, req, token, expected="success", casefile=""):
 case_runs = {}
 
 
-def result_slot(taskfile):
-    """Answer/result base path for this occurrence of a case.
+def result_slot(name):
+    """Baseline name for this occurrence of a case.
 
     A case may be listed more than once (startinfo runs before and after the
     databases the scenario creates), and the two runs answer differently. The
     second occurrence gets its own baseline instead of overwriting the first.
     """
-    seen = case_runs.get(taskfile, 0) + 1
-    case_runs[taskfile] = seen
-    return taskfile if seen == 1 else "%s.%d" % (taskfile, seen)
+    seen = case_runs.get(name, 0) + 1
+    case_runs[name] = seen
+    return name if seen == 1 else "%s.%d" % (name, seen)
 
 
 def do_one_job(name, taskfile, token, expected="success", record_files=True,
@@ -321,7 +351,7 @@ def do_one_job(name, taskfile, token, expected="success", record_files=True,
     text = "".join(normalize_response(b) for b in bodies)
     task = entries[0].get("task", name) if entries else name
     if record_files:
-        slot = result_slot(taskfile)
+        slot = answer_base(result_slot(name))
         if status_only:
             # The status verdict already recorded is the whole answer here.
             if file_check:
@@ -340,6 +370,9 @@ def write_answer(taskfile, text):
     plain run would otherwise quietly adopt whatever the server answered today
     as the thing to compare against tomorrow.
     """
+    directory = os.path.dirname(taskfile)
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
     with open(taskfile + ".answer", "w") as out:
         out.write(text)
 
@@ -360,13 +393,17 @@ def check_against_answer(name, taskfile, text, entries):
     if not os.path.isfile(answerfile):
         del results[len(results) - len(entries):]
         task = entries[0].get("task", name) if entries else name
-        note = "no %s; run with --answer once to create it" % answerfile
+        note = ("no %s; run with --answer %s once to create it"
+                % (answerfile, VERSION.replace("_", ".")))
         results.append({"name": name, "file": taskfile, "task": task,
                         "ok": False, "note": note, "response": text})
         print("%s [%s] : " % (name, task)
               + '\033[31mfailed ({0})\033[0m'.format(note))
         return
     resultfile = taskfile + ".result"
+    directory = os.path.dirname(resultfile)
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
     with open(resultfile, "w") as out:
         out.write(text)
     with open(answerfile, "r") as f:
@@ -891,6 +928,11 @@ def init_env():
 # --answer regenerates those .answer files. Nothing else writes them: adopting
 # today's response as tomorrow's baseline has to be asked for.
 #
+# Both take the CUBRID version the baseline belongs to, "11.4" or "11_4", as a
+# bare argument; without one, DEFAULT_VERSION is used. The same request answers
+# differently across engines, so a baseline is only meaningful next to the
+# version it was taken from.
+#
 # A case listed as "<case>,<status>" is status only in every mode -- it gets no
 # baseline and --file-check judges it by the status it declares.
 #
@@ -902,6 +944,7 @@ dump_mode = bool(args) and args[0] == "--dump"
 file_check = False
 make_answer = False
 listarg = DEFAULT_TEST_SET
+VERSION = DEFAULT_VERSION
 
 if not dump_mode:
     rest = []
@@ -913,6 +956,10 @@ if not dump_mode:
         elif arg.startswith("-"):
             print("unknown option: %s" % arg)
             sys.exit(2)
+        elif normalize_version(arg):
+            # A bare "11.4" is the version of the baseline, not a test set: a
+            # set is named by a list file and those end in .txt.
+            VERSION = normalize_version(arg)
         else:
             rest.append(arg)
     if len(rest) > 1:
@@ -920,6 +967,11 @@ if not dump_mode:
         sys.exit(2)
     if rest:
         listarg = rest[0]
+    if VERSION not in KNOWN_VERSIONS:
+        print("unknown version %s; known ones are %s"
+              % (VERSION.replace("_", "."),
+                 ", ".join(v.replace("_", ".") for v in KNOWN_VERSIONS)))
+        sys.exit(2)
     if file_check and make_answer:
         print("--file-check compares against the baseline, --answer replaces "
               "it; pick one")
@@ -966,6 +1018,9 @@ finally:
 xmlfile = os.path.join("log", REPORT_BASE + ".xml")
 write_junit_xml(xmlfile)
 write_junit_xml(detail_xml_path(xmlfile), with_response=True)
+
+if file_check or make_answer:
+    print("\n\033[33mbaselines: %s\033[0m" % answer_dir())
 
 nstatus = sum(1 for r in results if r.get("status_only"))
 if nstatus:

@@ -128,7 +128,9 @@ setautoaddvol
 
 getlogfileinfo
 getloginfo,success
-viewlog
+// viewlog reads the manager log this suite is writing to, from line 1,
+// so its content grows with every run. status only.
+viewlog,success
 removelog
 
 

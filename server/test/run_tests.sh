@@ -8,6 +8,11 @@
 #   ./run_tests.sh task_result_check.txt        run another set
 #   ./run_tests.sh -fc task_result_check.txt    compare against the .answer files
 #   ./run_tests.sh -a task_result_check.txt     regenerate those .answer files
+#
+# Baselines are per CUBRID version. Pass the version as a bare argument to pick
+# the directory they live in; without one, 11.4 is used.
+#   ./run_tests.sh -a  11.4 task_result_check.txt
+#   ./run_tests.sh -fc 11.4 task_result_check.txt
 #   ./run_tests.sh --all                        run every set in task_test_case/
 #   ./run_tests.sh --clean                      drop log/ and the .result files
 #
@@ -23,12 +28,12 @@ CASE_ROOT=task_test_case
 LOG_DIR=log
 
 usage() {
-    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 clean() {
     rm -rf "$LOG_DIR"
-    find "$CASE_ROOT" -name '*.result' -delete
+    find "$CASE_ROOT" -name "*.result" -delete
     echo "removed $LOG_DIR and the .result files"
 }
 

@@ -1,3 +1,5 @@
 # reports of a run; the answers next to the cases are the committed baseline
 log/
-task_test_case/*/*.result
+task_test_case/*/*/*.result
+*.log
+csql.*

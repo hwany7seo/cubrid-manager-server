@@ -8,15 +8,20 @@
 - 재확인 요청 항목(트리거 `;`, compactdb 전용 DB, renamedb advanced off)을 반영한 뒤:
   **14건 / 196 케이스** (연속 2회 실행 결과 동일 — 재현 가능)
 - CMS를 현재 소스에서 새로 빌드하고(보안 강화 커밋 포함) `dbmtuserlogin` 수정을 적용한
-  서버로 다시 돌린 뒤: **10건 / 196 케이스** — 남은 10건은 전부 환경 제약(5장)이다.
+  서버로 다시 돌린 뒤: **10건 / 196 케이스**.
+- 환경 제약 항목을 HA를 제외하고 모두 해소한 뒤: **2건 / 199 케이스**
+  (연속 2회 동일 — 재현 가능). 남은 2건은 HA 미구성 케이스뿐이다.
 
 즉 **서버 버그 4건은 해소**되었고, 새 빌드에서 드러난 테스트 케이스 문제 3건
-(`runscript`, `backupdb_rep`, `updateuser_nopasswd`)도 고쳤다 → **6장** 참고.
+(`runscript`, `backupdb_rep`, `updateuser_nopasswd`)도 고쳤으며(**6장**),
+환경 제약으로 분류했던 8건도 HA 2건만 남기고 모두 통과시켰다(**5장**).
+`renamedb` advanced on 경로도 실제로는 정상이며, 전용 DB로 커버리지를 복구했다(**7장**).
 
 검증 환경(최초): `CUBRID 11.5.0 (11.5.0.2405-a2c3e03)`, non-HA, shard 미구성,
 `support_mon_statistic=NO`.
 검증 환경(현재): `CUBRID 11.5.0 (11.5.0.2441-6ba9522)` + 현재 소스에서 빌드한
-`cub_manager`(`a2393c2` 보안 강화, `90e82a2` 포함). 나머지 조건은 동일.
+`cub_manager`(`a2393c2` 보안 강화, `90e82a2` 포함), `support_mon_statistic=YES`,
+non-HA는 그대로.
 
 ---
 
@@ -189,10 +194,14 @@
 ### 실행 반복 가능성
 
 `reset_test_dbs()`를 추가해, 실행 전/후에 **테스트가 만든 DB만**
-(`alatestdb`, `compactdbtest`, `destinationdb`, `anotherdb`, `copydb`, `destinationdb1`)
-디렉터리와 `databases.txt` 등록정보를 함께 정리한다. `demodb`는 대상이 아니다.
-기존 `clean_env()`는 디렉터리만 지우고 `databases.txt` 항목을 남겨서, 중간에 죽은 실행이
-다음 실행을 깨뜨렸다(이번에 실제로 `destinationdb` 잔여 항목을 발견).
+(`alatestdb`, `compactdbtest`, `destinationdb`, `anotherdb`, `copydb`, `destinationdb1`,
+`renameadvdb`, `renamedadvdb`) 디렉터리와 `databases.txt` 등록정보를 함께 정리한다.
+`demodb`는 대상이 아니다. 기존 `clean_env()`는 디렉터리만 지우고 `databases.txt` 항목을
+남겨서, 중간에 죽은 실행이 다음 실행을 깨뜨렸다(이번에 실제로 `destinationdb` 잔여 항목을
+발견).
+
+여기에 더해 `stop_test_servers()`를 붙였다. 디렉터리를 지워도 살아남는 `cub_server <db>`
+프로세스가 다음 실행을 통째로 망가뜨리기 때문이다 → **10장**.
 
 ---
 
@@ -213,26 +222,83 @@
 
 ---
 
-## 5. 환경 제약 / 비결정적 케이스 (남은 10건)
+## 5. 환경 제약 / 비결정적 케이스 (8건 해소, HA 2건 잔존)
 
-이 검증 환경(non-HA, shard 미구성, 모니터링 통계 비활성, 특정 프로세스/트랜잭션 부재)에서는
-성공할 수 없다. 서버 버그가 아니며, 테스트 케이스만으로는 결정적으로 통과시킬 수 없다.
+기존에 "환경 제약 10건"으로 분류했던 항목이다. HA 2건을 제외하고 **8건 모두 통과**하도록
+만들었다. 아래는 각 항목의 최종 상태다.
 
-| 케이스 | 증상 | 성격 |
+| 케이스 | 최종 상태 | 근거 |
 | --- | --- | --- |
-| `changemode` | `The server was not configured for HA.` | HA 미구성 |
-| `rolechange` | `'deact' command is invalid.` | HA 미구성 |
-| `set_mon_interval` | `Set monitoring interval for monitoring statistic failed!` | `support_mon_statistic=NO` |
-| `get_mon_statistic` (16건 중 5건) | `Can't find dbname_vol[demodb] in meta[k_db_rrd]`, `read rrd file failed [...]` | 모니터링 통계 미수집(rrd 없음) |
-| `killprocess` | `No such process` | 하드코딩된 pid를 kill → 비결정적 |
-| `killtransaction` | `Invalid tranindex(2(+))` | 하드코딩된 tranindex를 kill → 활성 트랜잭션 없으면 실패 |
+| `changemode` | **미해결** | `The server was not configured for HA.` — HA 구성 필요 |
+| `rolechange` | **미해결** | `'deact' command is invalid.` — HA 구성 필요 |
+| `set_mon_interval` | 해소 | 5-1 |
+| `get_mon_statistic` (16건 중 5건) | 해소 | 5-1, 5-2 |
+| `killprocess` | 해소 | 5-3 |
+| `killtransaction` | 해소 | 5-3 |
 
-### 참고
-- HA 계열(`changemode`, `rolechange`)과 모니터링 통계 계열은, HA를 구성하고
-  `cm.conf`의 `support_mon_statistic=YES` + 데이터 수집 후에만 검증 가능하다.
-- `killprocess` / `killtransaction`은 실행 시점에 실제로 존재하는 pid/tranindex가 있어야
-  성공한다. 현재 케이스는 고정 값(`2(+)` 등)을 써서 항상 실패한다. 결정적으로 만들려면
-  테스트가 대상 프로세스/트랜잭션을 스스로 만들고 그 id를 넣도록 재설계해야 한다.
+### 5-1. 모니터링 통계 — 설정 하나가 아니라 메타/rrd 불일치까지 겹쳐 있었다
+
+`cm.conf`에 `support_mon_statistic YES`를 넣는 것으로 끝나지 않는다. 원인은 세 겹이다.
+
+1. **수집 자체가 꺼져 있었다.** `mon_stat_init()`(`cm_server_interface.cpp:126`)은
+   플래그와 무관하게 항상 호출돼 `meta.json`과 rrd 파일을 만든다. 반면 실제 수집
+   `gather_mon_data()`는 `sco.iSupportMonStat == TRUE`일 때만 돈다
+   (`cm_httpd.cpp:434`). 그래서 **파일은 있는데 내용이 비어 있는** 상태였고,
+   `k_total_vol_num`이 0이라 `vol_mon` 파일 자체가 만들어지지 않았다.
+2. **그 상태에서 `set_mon_interval`이 메타를 깨뜨린다.** `reset_meta()`
+   (`cm_mon_stat.cpp:1627`)는 broker → DB → volume → os 순서로 파일을 하나씩 리사이즈하고
+   **맨 마지막에** `K_INTERVAL`을 갱신한다. `vol_mon`이 없으므로 3번째 단계에서
+   `get_rrdfile`이 실패하고 함수가 중단되는데, 이미 리사이즈된 broker/DB 파일은
+   그대로 남는다. 결과적으로 **메타는 interval 60, 파일은 interval 80 크기**가 되어
+   이후 모든 `set_mon_interval` 호출이 첫 단계에서 EOF로 실패한다(로그의
+   `bufsize:[50500]` vs 실제 43300 ints).
+3. **같은 불일치가 `get_mon_statistic`도 깨뜨렸다.** yearly 오프셋은
+   `86400/interval + 30*24 = 2160`행부터 365행을 읽는데, 파일은 2165행뿐이라 EOF가 난다
+   (`db_io_read` yearly 1건이 여기 해당). 나머지 4건은 `vol_freespace`로,
+   볼륨이 등록된 적이 없어 `Can't find dbname_vol[demodb] in meta[k_db_rrd]`였다.
+
+조치(적용 완료):
+
+- `cm.conf`에 `support_mon_statistic YES` 추가.
+- 깨진 `meta.json` / rrd 파일을 지우고 CMS 재시작 → `mon_stat_init()`이 새로 만들고,
+  첫 수집 주기에 `demodb`의 볼륨 3개가 `k_db_rrd["demodb_vol"]`에 등록된다.
+- 이후 `set_mon_interval`은 성공하고, 4개 파일이 모두 interval 80 크기로 일관되게
+  리사이즈된다(broker 173200 / db 164540 / os 86600 / vol 51960 bytes = 각각 2165행).
+- `setsysparam_cmconf` 케이스가 `cm.conf`를 **하드코딩된 내용으로 덮어쓴다**는 점도
+  발견했다. 그대로 두면 테스트가 자기 실행 중에 `support_mon_statistic`을 지워서
+  다음 실행이 깨진다 → 케이스의 `confdata`에도 같은 줄을 넣었다.
+
+> 서버 측 개선 여지: `reset_meta()`가 원자적이지 않아 중간 실패 시 메타/파일이 영구히
+> 어긋난다. `k_total_vol_num == 0`이면 `vol_mon` 리사이즈를 건너뛰거나, 초기화 시점에
+> 빈 `vol_mon`을 만들어 두는 편이 안전하다. → **9장**
+
+### 5-2. `get_mon_statistic`의 `volname`은 등록된 볼륨 이름이어야 한다
+
+수집이 켜지자 4건이 `Can't find volname[demodb]`로 바뀌었다. 메타에 등록되는 이름은
+`dbspaceinfo`의 `spacename`, 즉 **데이터 볼륨의 전체 경로**다.
+
+```json
+"demodb_vol": {
+  "/.../databases/demodb/demodb": 0, "demodb_lgat": 1, "demodb_lgar_t": 2
+}
+```
+
+케이스의 `"volname":"demodb"`를 `"$CUBRID_DATABASES/demodb/demodb"`로 고쳐 16건 전부
+success.
+
+### 5-3. `killprocess` / `killtransaction` — 실행 시점에 대상을 직접 만든다
+
+고정 값(pid `99999`, tranindex `2(+)`)은 어느 호스트에서도 맞지 않는다.
+`test_tasks.py`에 실행 시점 치환을 추가했다.
+
+- `build_env()` → `start_kill_targets()`가
+  - `sleep 3600`을 띄워 그 pid를 `$TEST_KILL_PID`로,
+  - `csql --CS-mode -u dba demodb`에 `;autocommit off` + `select`를 넣어 트랜잭션을
+    열어 두고, `gettransactioninfo`로 그 pid의 항목을 찾아 tranindex를
+    `$TEST_TRANINDEX`로 넣는다. 응답은 `"1(ACTIVE)"` 형식이므로 숫자만 뽑는다
+    (`killtran --kill-transaction-index`는 순수 정수만 받는다).
+- `replace_env_vars()`가 케이스 파일의 두 플레이스홀더를 치환하고,
+  `clean_env()` → `stop_kill_targets()`가 남은 보조 프로세스를 정리한다.
 
 ---
 
@@ -276,7 +342,46 @@
 
 ---
 
-## 7. 재현 방법
+## 7. `renamedb` advanced on — 서버 버그가 아니었다 (2-2 정정)
+
+2-2에서 "`tsRenameDB()`의 `"%d %s %s\n"` 맵 파일 형식이 `cubrid renamedb -i`와 불일치"라고
+적었는데, **형식은 정확히 맞다.** 실제 원인은 케이스가 볼륨을 다 나열하지 않은 것이었다.
+
+엔진 쪽 파서는 `logpb_next_where_path()`(`src/transaction/log_page_buffer.c:9332`)다.
+
+```c
+sprintf (format_string, "%%d %%%ds %%%ds", PATH_MAX - 1, PATH_MAX - 1);
+if (fscanf (where_paths_fp, format_string, &from_volid, from_volname, to_volname) != 3)
+  → ER_LOG_USER_FILE_WITHOUT_ENOUGH_ENTRIES  /* "%d entries expected" = num_perm_vols */
+```
+
+- 요구 형식은 `<volid> <from_fullvolname> <to_fullvolname>` — CMS가 쓰는 것과 동일하다.
+- 단, **영구 볼륨 개수만큼, volid 순서대로** 있어야 한다. 부족하면
+  `does not have enough entries: N entries expected`(N = `num_perm_vols`)가 난다.
+  volid나 현재 경로가 어긋나면 `unordered entries`가 난다.
+- 기존 케이스(`task_test_case/renamedb`)는 주 볼륨 하나만 매핑했다. 원래 실패 메시지의
+  `3 entries expected`는 `destinationdb`가 `addvoldb`를 거쳐 영구 볼륨 3개였기 때문이다.
+
+실증(적용 완료): 볼륨을 빠짐없이 매핑하니 advanced on이 그대로 성공한다.
+영구 볼륨이 2개(`<db>`, `<db>_x001`)인 DB로 확인했고, 1개만 매핑하면
+`2 entries expected`, 2개 모두 매핑하면 success.
+
+커버리지 복구: 기존 `renamedb`(advanced off) 체인은 그대로 두고, 볼륨 구성이 확정적인
+전용 DB로 advanced on 케이스를 추가했다.
+
+```
+createdb_for_renameadv   # renameadvdb 생성 (영구 볼륨 1개)
+renamedb_advanced        # renameadvdb → renamedadvdb, advanced:"on"
+deletedb_for_renameadv   # renamedadvdb 제거
+```
+
+> CMS 쪽에 남는 아쉬움: `tsRenameDB()`는 요청에 담긴 볼륨만 그대로 받아 적고, 대상 DB의
+> 실제 영구 볼륨 목록과 대조하지 않는다. 누락되면 엔진의 저수준 메시지가 그대로 노출된다.
+> → **9장**
+
+---
+
+## 8. 재현 방법
 
 ```sh
 cd server/test
@@ -289,10 +394,132 @@ python3 test_tasks.py --dump dbmtuserlogin
 
 ---
 
-## 8. 남은 서버 측 확인 과제
+## 9. 남은 서버 측 확인 과제
 
 | 항목 | 상태 | 내용 |
 | --- | --- | --- |
 | 1-1 | 실행 서버 반영됨 / **소스 미반영** | `SET{t.g.name}` → `SET{t.g}`. 실행 중인 바이너리에는 두 쿼리가 모두 들어 있어 버전 분기가 된 것으로 보인다. 같은 수정을 이 저장소 소스(`cm_job_task.cpp:10173`)에도 반영해야 한다 |
 | 1-3 | **미반영** | `op_make_triggerinput_file_add/alter/drop()`에서 문장 끝 `;` 출력. 새 빌드에도 안 들어갔음(포맷 문자열 확인). 고치면 테스트의 `;` 우회 되돌리기 |
-| 2-2 | 미확인 | `tsRenameDB()`의 advanced on 경로: `"%d %s %s\n"` 맵 파일 형식이 CUBRID 11.5 `cubrid renamedb -i`와 불일치. 현재 테스트는 advanced off로만 검증 중 |
+| 2-2 / 7장 | **정정됨 — 서버 버그 아님** | 맵 파일 형식은 정확하다. 다만 `tsRenameDB()`가 요청의 볼륨 목록을 실제 영구 볼륨과 대조하지 않아, 누락 시 엔진의 저수준 메시지가 그대로 노출된다(개선 여지) |
+| 5-1 | 신규 | `reset_meta()`가 원자적이지 않다. 중간 실패 시 rrd 파일은 새 interval 크기, `meta.json`은 옛 interval로 남아 `set_mon_interval` / `get_mon_statistic`이 영구히 깨진다. `k_total_vol_num == 0`이면 `vol_mon` 리사이즈를 건너뛰거나 초기화 때 빈 파일을 만들 것 |
+| 5-1 | 신규 | 모니터링 메타에 등록된 DB/볼륨이 **삭제 후에도 남는다**. 테스트가 만든 임시 DB가 매 실행마다 누적돼 `db_mon` / `vol_mon`이 계속 커진다(정리 로직 없음) |
+| 엔진 | 신규 | `ER_BO_CANNOT_CREATE_VOL` 메시지에 **초기화되지 않은 메모리가 찍힌다** → 아래 참고 |
+
+### 9-1. `ER_BO_CANNOT_CREATE_VOL` — 포맷 인자 개수 불일치 (엔진 버그)
+
+메시지 카탈로그(`msg/en_US.utf8/cubrid.msg:195`)는 인자를 **3개** 받는다.
+
+```
+123 Unable to create %1$s for database "%2$s". Please refer "%3$s" for additional information.
+```
+
+그런데 두 호출부가 **2개만 넘긴다.**
+
+- `src/transaction/log_page_buffer.c:4704` — `er_set_with_oserror (..., ER_BO_CANNOT_CREATE_VOL, 2, volinfo_fullname, db_fullname)`
+- `src/storage/file_io.c:2451` — `er_set_with_oserror (..., ER_BO_CANNOT_CREATE_VOL, 2, vol_label_p, db_full_name_p)`
+
+(정상 호출부는 3개를 넘긴다: `src/storage/tde.c:345`, `src/transaction/boot_sr.c:1866`.)
+
+그 결과 `%3$s`가 스택의 쓰레기 값을 읽어 **프로세스 메모리 내용이 그대로 로그와 API 응답에
+노출된다.** 실제로 관찰된 문자열은 x86 기계어 바이트다.
+
+```
+renamedb Unable to create /.../renamedadvdb/renamedadvdb_vinf for database "/.../renamedadvdb".
+Please refer "H^I^CH^E^@tHL^I^a^:^{^?^?^?H^M5F^(G" for additional information.... No such file or directory
+```
+
+파급:
+
+- 정보 노출(프로세스 메모리) — 보안 관점에서도 수정 대상이다.
+- 이 바이트가 `cub_manager.err`에 남으면 `loadaccesslog` 응답이 **유효한 UTF-8이 아니게 되어**
+  JSON 디코딩이 깨진다. 로그는 실행마다 누적되므로 한 번 오염되면 이후 모든 실행에서
+  `loadaccesslog`가 실패한다(실제로 재현됨).
+- 테스트 측 대응: 러너가 `response.decode(errors="replace")`로 읽도록 했다. 서버 결함을
+  덮는 게 아니라, 로그를 되돌려주는 task의 페이로드 때문에 **무관한 케이스가 실패하지
+  않도록** 하는 것이다.
+
+---
+
+## 10. 검증 환경에 대한 주의
+
+- **CMS는 샌드박스 밖에서 기동해야 한다.** 제한된 셸에서 `cubrid manager start`로 띄운
+  CMS는 `stopdb`가 `cubrid server stop`을 실행해도 서버가 내려가지 않아
+  `cmd_stop_server()`(`cm_cmd_exec.cpp:305`)가 30초를 다 쓰고 `execute timeout`을 낸다.
+  같은 명령을 셸에서 직접 실행하면 1초면 끝난다. 제품 버그가 아니라 기동 환경 문제이며,
+  일반 셸에서 재기동하면 `stopdb`는 4초 내에 성공한다.
+- **`stopdb`가 실패하면 좀비 `cub_server`가 남는다.** 디렉터리를 지워도 프로세스는 살아
+  있어서, 다음 실행이 `Database(...) is active state` / `Unable to mount disk volume`으로
+  연쇄 실패한다. `reset_test_dbs()`에 `stop_test_servers()`를 추가해 테스트가 만든 DB의
+  서버를 실행 전후에 정리하도록 했다.
+- **중단된 실행은 dbmt 사용자 `yifan`을 남긴다.** `build_env()`에서 best-effort로
+  `deletedbmtuser`를 먼저 호출해 다음 실행의 `adddbmtuser`가 깨지지 않도록 했다.
+
+---
+
+## 11. 중단된 실행에 대한 내성
+
+`build_env()`까지만 돌고 중간에 죽은 실행이 무엇을 남기는지 실제로 죽여 가며 확인했다.
+
+| 남는 것 | SIGTERM / 예외 / Ctrl-C | SIGKILL |
+| --- | --- | --- |
+| 열어 둔 트랜잭션(csql) | 정리됨 | **자동 정리됨** — 아래 참고 |
+| 더미 프로세스(`sleep 3600`) | 정리됨 | **남는다** → pid 파일로 회수 |
+| 테스트 DB 디렉터리 / `databases.txt` | 다음 실행이 정리 | 다음 실행이 정리 |
+| 좀비 `cub_server` | 다음 실행이 정리 | 다음 실행이 정리 |
+| dbmt 사용자 `yifan` | 다음 실행이 정리 | 다음 실행이 정리 |
+| `loaddb` 입력 파일 | 영향 없음(전용 덤프 사용) | 영향 없음 |
+
+### 11-1. 트랜잭션은 남지 않는다 (확인함)
+
+csql은 `stdin=PIPE`로 띄운다. 부모가 SIGKILL로 죽으면 파이프가 닫히고 csql이 EOF를 받아
+스스로 종료하며, 열려 있던 트랜잭션은 롤백된다. 실측:
+
+```
+--- before kill ---   1(ACTIVE)  DBA  ...  csql
+--- after SIGKILL of parent ---   csql exited / There are no transactions
+```
+
+### 11-2. 더미 프로세스는 남는다 → pid 파일로 회수
+
+`sleep 3600`은 부모와 무관하게 살아남아 최대 1시간 떠 있는다. `start_kill_targets()`가
+`log/helper_pids`에 **pid와 커맨드라인을 함께** 기록하고, 다음 실행의
+`sweep_stale_helpers()`가 `/proc/<pid>/cmdline`이 기록과 **정확히 일치할 때만** 죽인다
+(pid 재사용으로 무관한 프로세스를 죽이지 않기 위해서다). 실측:
+
+```
+killing helper left over from an earlier run: 1349894 sleep 3600
+```
+
+정상 종료 경로도 보강했다. `atexit`에 `stop_kill_targets()`를 걸고 `SIGTERM`/`SIGHUP`을
+`sys.exit()`로 바꿔, `finally`와 `atexit`이 모두 실행되게 했다. `build_env()`도 `try` 안으로
+옮겨서, 그 안에서 예외가 나도 정리가 돈다.
+
+### 11-3. 실행 시작 시 서비스 재시작
+
+위의 개별 정리로도 못 고치는 상태(모니터링 메타 불일치 등)가 있어서, 전체 실행은
+**서비스 재시작으로 시작**한다(`restart_services()`, `--dump` 모드는 제외).
+
+```
+cubrid service stop        # CMS·브로커·모든 DB 정지, 남은 클라이언트 정리
+(mon_data/* 삭제)          # 정지 상태에서만 안전하게 지울 수 있다
+cubrid service start
+cubrid server start demodb # cubrid.conf에 없더라도 demodb는 반드시 올린다
+→ cm_port가 응답할 때까지 대기
+```
+
+`mon_data`를 지우는 이유는 5-1에 적은 `reset_meta()` 비원자성 때문이다. 한 번 어긋난
+메타/rrd는 스스로 복구되지 않으므로, 매 실행이 CMS에게 새로 만들게 한다.
+이어서 `build_env()`가 `wait_for_mon_data()`로 **첫 수집이 끝날 때까지 기다린다**.
+기다리지 않으면 `vol_mon`이 아직 없어 `set_mon_interval`이 실패하고, 그 실패가 다시
+메타를 깨뜨린다.
+
+### 11-4. `loaddb` 입력의 실행 간 결합 제거
+
+`loaddb`(목록 83행)는 `delete_orignal_files:"y"`로 입력 파일을 **소비**하는데, 그 입력이
+`demodb`의 덤프였고 그 덤프를 만드는 `unloaddb`는 목록 **136행**에 있었다. 즉 `loaddb`는
+직전 실행이 남긴 파일을 읽고 있었고, 중간에 죽은 실행이 있으면 다음 실행이
+`file does not exists: .../demodb_schema`로 깨졌다(실제로 재현됨).
+
+`build_env()`가 `cubrid unloaddb --CS-mode -O $CUBRID/tmp --output-prefix test_loaddb demodb`로
+**일회용 덤프**를 만들고 케이스가 그것을 가리키게 했다. `delete_orignal_files:"y"` 경로는
+그대로 검증하면서, demodb의 원본은 건드리지 않는다.
