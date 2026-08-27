@@ -1,0 +1,212 @@
+name: CMS API test
+
+# Builds CUBRID with this PR's manager server and runs the API test suite
+# (server/test, task_result_check) against it.
+#
+# The result never blocks a merge: the job finishes green either way and says
+# PASS or FAIL in the job summary and in a comment on the PR. To make it
+# blocking instead, replace the "exit 0" at the end of the test step with
+# "exit $status" and mark this check as required in the branch protection
+# rules for develop.
+
+on:
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: 'CUBRID/cubrid branch or tag to build against'
+        default: develop
+        required: false
+
+concurrency:
+  group: cms-api-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # for the result comment
+
+env:
+  ENGINE_REPO: CUBRID/cubrid
+  ENGINE_REF: ${{ github.event.inputs.engine_ref || 'develop' }}
+  TEST_SET: task_result_check.txt
+
+jobs:
+  cms-api-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      # The manager server is a submodule of CUBRID/cubrid at path
+      # "cubridmanager", and it is built as part of the engine. So the engine
+      # is what gets checked out, and this PR replaces that submodule.
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ENGINE_REPO }}
+          ref: ${{ env.ENGINE_REF }}
+          submodules: recursive
+          fetch-depth: 1
+          path: cubrid
+
+      - name: Check out this PR over the cubridmanager submodule
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: cubrid/cubridmanager
+
+      # The engine's VERSION file ("11.5.0") decides which baseline directory
+      # the test compares against, so 11.4 and 11.5 do not share one.
+      - name: Resolve the test version from VERSION
+        id: version
+        working-directory: cubrid
+        run: |
+          set -euo pipefail
+          full=$(tr -d '[:space:]' < VERSION)
+          short=$(echo "$full" | cut -d. -f1,2)
+          dir=${short/./_}
+          echo "full=$full"   >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "dir=$dir"     >> "$GITHUB_OUTPUT"
+          echo "engine VERSION=$full -> test version $short (baselines in $dir/)"
+
+          # Without a baseline for this version every compared case fails on a
+          # missing .answer, which is a setup gap rather than a regression.
+          baselines="cubridmanager/server/test/task_test_case/task_result_check/$dir"
+          if [ -z "$(ls -A "$baselines"/*.answer 2>/dev/null)" ]; then
+            echo "::warning title=No baseline::$dir has no .answer files; run \
+              './run_tests.sh -a $short task_result_check.txt' on a $short build and commit them"
+          fi
+
+      - name: Install build and test dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ccache \
+            autoconf automake libtool bison flex \
+            libncurses-dev libexpat1-dev zlib1g-dev \
+            default-jdk ant systemtap-sdt-dev rsync
+
+      - name: Cache the compiler output
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-
+            ccache-${{ runner.os }}-
+
+      - name: Build CUBRID with this manager server
+        working-directory: cubrid
+        run: |
+          set -euo pipefail
+          export JAVA_HOME=${JAVA_HOME:-$(dirname $(dirname $(readlink -f $(which javac))))}
+          export CCACHE_DIR=$HOME/.ccache
+          export PATH="/usr/lib/ccache:$PATH"
+          ./build.sh -m release -p "$GITHUB_WORKSPACE/CUBRID" build
+          test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
+            || { echo "cub_manager was not built"; exit 1; }
+
+      # The suite runs every case against demodb: it reads its volumes, unloads
+      # its classes and opens transactions on it. The demo data has to be there,
+      # not just an empty database.
+      - name: Create demodb and start the service
+        run: |
+          set -euo pipefail
+          export CUBRID="$GITHUB_WORKSPACE/CUBRID"
+          export CUBRID_DATABASES="$CUBRID/databases"
+          export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
+          export PATH="$CUBRID/bin:$PATH"
+          mkdir -p "$CUBRID_DATABASES"
+          sh "$CUBRID/demo/make_cubrid_demo.sh"
+          cubrid service start
+          cubrid server start demodb
+          for i in $(seq 1 60); do
+            pgrep -f '^cub_server demodb$' >/dev/null && break
+            sleep 1
+          done
+          pgrep -f '^cub_server demodb$' >/dev/null \
+            || { echo "demodb did not start"; cubrid server status; exit 1; }
+
+      - name: Run the API test suite
+        id: run
+        working-directory: cubrid/cubridmanager/server/test
+        run: |
+          set -uo pipefail
+          export CUBRID="$GITHUB_WORKSPACE/CUBRID"
+          export CUBRID_DATABASES="$CUBRID/databases"
+          export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
+          export PATH="$CUBRID/bin:$PATH"
+          ./run_tests.sh -fc "${{ steps.version.outputs.short }}" "$TEST_SET" \
+            2>&1 | tee run.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # The verdict is reported, not enforced: a failure here must not stop
+          # the PR from being merged.
+          exit 0
+
+      - name: Summarise the result
+        id: summary
+        if: always()
+        working-directory: cubrid/cubridmanager/server/test
+        run: |
+          set -uo pipefail
+          version='${{ steps.version.outputs.short }}'
+          status='${{ steps.run.outputs.status }}'
+          if [ "$status" = "0" ]; then
+            verdict='✅ PASS'
+          else
+            verdict='❌ FAIL'
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## CMS API test — $verdict"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| engine | \`${ENGINE_REPO}@${ENGINE_REF}\` (VERSION ${{ steps.version.outputs.full }}) |"
+            echo "| test set | \`$TEST_SET\` |"
+            echo "| baselines | \`${{ steps.version.outputs.dir }}/\` |"
+            echo
+            tail -n 3 run.log | grep -E 'succeeded|failed' || true
+            echo
+            if [ "$status" != "0" ]; then
+              echo "<details><summary>failed cases</summary>"
+              echo
+              echo '```'
+              sed 's/\x1b\[[0-9;]*m//g' run.log | sed -n '/task(s) failed/,$p' | head -40
+              echo '```'
+              echo
+              echo "</details>"
+            fi
+            echo
+            echo "This check never blocks the merge; it only reports."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the result on the PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true   # a PR from a fork has no write token
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: cms-api-test
+          message: |
+            **CMS API test — ${{ steps.summary.outputs.verdict }}**
+
+            engine `${{ env.ENGINE_REPO }}@${{ env.ENGINE_REF }}` (VERSION ${{ steps.version.outputs.full }}),
+            baselines `${{ steps.version.outputs.dir }}/`.
+            See the job summary for the failing cases. This check does not block the merge.
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cms-api-test-${{ steps.version.outputs.dir }}
+          path: |
+            cubrid/cubridmanager/server/test/run.log
+            cubrid/cubridmanager/server/test/log/
+            cubrid/cubridmanager/server/test/task_test_case/task_result_check/${{ steps.version.outputs.dir }}/*.result
+          retention-days: 14
+          if-no-files-found: warn
