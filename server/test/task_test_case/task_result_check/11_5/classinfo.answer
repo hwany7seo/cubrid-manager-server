@@ -281,22 +281,7 @@
                "virtual": "view"
             },
             {
-               "classname": "information_schema.routine_privileges",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.routines",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.schemata",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.foreign_servers",
+               "classname": "information_schema.synonyms",
                "owner": "INFORMATION_SCHEMA",
                "virtual": "view"
             },
@@ -321,6 +306,31 @@
                "virtual": "view"
             },
             {
+               "classname": "information_schema.routine_privileges",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.routines",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.schemata",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.sequences",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.statistics",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
                "classname": "information_schema.column_privileges",
                "owner": "INFORMATION_SCHEMA",
                "virtual": "view"
@@ -336,12 +346,7 @@
                "virtual": "view"
             },
             {
-               "classname": "information_schema.table_privileges",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.tables",
+               "classname": "information_schema.foreign_servers",
                "owner": "INFORMATION_SCHEMA",
                "virtual": "view"
             },
@@ -356,22 +361,17 @@
                "virtual": "view"
             },
             {
-               "classname": "information_schema.sequences",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.statistics",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
-               "classname": "information_schema.synonyms",
-               "owner": "INFORMATION_SCHEMA",
-               "virtual": "view"
-            },
-            {
                "classname": "information_schema.table_constraints",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.table_privileges",
+               "owner": "INFORMATION_SCHEMA",
+               "virtual": "view"
+            },
+            {
+               "classname": "information_schema.tables",
                "owner": "INFORMATION_SCHEMA",
                "virtual": "view"
             }

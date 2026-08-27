@@ -33,7 +33,7 @@
    "num_log_page_ioreads": "0",
    "num_log_page_iowrites": "0",
    "num_log_wals": "0",
-   "num_network_requests": "5",
+   "num_network_requests": "2",
    "num_object_locks_acquired": "0",
    "num_object_locks_converted": "0",
    "num_object_locks_re_requested": "0",

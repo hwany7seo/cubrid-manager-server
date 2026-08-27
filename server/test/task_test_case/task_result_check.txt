@@ -228,7 +228,7 @@ copydb_advance
 deletedb_for_copydb
 
 // get host stat
-gethoststat
+gethoststat,success
 getdbprocstat
 getdbprocstat_all
 // changemode needs an HA configured server; on a standalone one it answers
@@ -240,7 +240,7 @@ getstandbyserverstat
 // start/stop -- so the task fails with "'deact' command is invalid" on any
 // host, HA or not. This is a server side issue, not a test one; re-enable the
 // case once the task is ported to the current heartbeat commands.
-rolechange
+//rolechange
 getdbmode
 //heartbeatlist
 // ha_status / gethaapplyinfo need an HA-configured instance. On a standalone

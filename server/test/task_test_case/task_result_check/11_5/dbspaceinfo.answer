@@ -31,25 +31,25 @@
          "data_type": "INDEX",
          "file_count": "30",
          "file_table_size": "30",
-         "reserved_size": "1828",
+         "reserved_size": "1825",
          "total_size": "1920",
-         "used_size": "62"
+         "used_size": "65"
       },
       {
          "data_type": "HEAP",
          "file_count": "34",
          "file_table_size": "34",
-         "reserved_size": "1815",
+         "reserved_size": "1811",
          "total_size": "2176",
-         "used_size": "327"
+         "used_size": "331"
       },
       {
          "data_type": "SYSTEM",
          "file_count": "8",
          "file_table_size": "8",
-         "reserved_size": "469",
+         "reserved_size": "467",
          "total_size": "576",
-         "used_size": "99"
+         "used_size": "101"
       },
       {
          "data_type": "TEMP",
@@ -66,7 +66,7 @@
    "pagesize": "4096",
    "spaceinfo": [
       {
-         "date": "20260821",
+         "date": "20260827",
          "freepage": "7552",
          "location": "$CUBRID_DATABASES/alatestdb/alatestdb",
          "purpose": "PERMANENT",
@@ -77,7 +77,7 @@
          "volid": "0"
       },
       {
-         "date": "20260821",
+         "date": "20260827",
          "freepage": "4032",
          "location": "$CUBRID_DATABASES/alatestdb/alatestdb_data_x001",
          "purpose": "PERMANENT",
@@ -88,7 +88,7 @@
          "volid": "1"
       },
       {
-         "date": "20260821",
+         "date": "20260827",
          "freepage": "4032",
          "location": "$CUBRID_DATABASES/alatestdb/alatestdb_x002",
          "purpose": "PERMANENT",
@@ -99,7 +99,7 @@
          "volid": "2"
       },
       {
-         "date": "20260821",
+         "date": "20260827",
          "freepage": " ",
          "location": "$CUBRID_DATABASES/alatestdb",
          "spacename": "alatestdb_lgat",
@@ -107,7 +107,7 @@
          "type": "Active_log"
       },
       {
-         "date": "20260821",
+         "date": "20260827",
          "freepage": " ",
          "location": "$CUBRID_DATABASES/alatestdb",
          "spacename": "alatestdb_lgar_t",

@@ -1,7 +1,7 @@
 {
-   "BROKERVER": "VERSION 11.5.0.2441",
+   "BROKERVER": "VERSION 11.5.0.2490",
    "CUBRID": "$CUBRID",
-   "CUBRIDVER": "CUBRID 11.5.0 (11.5.0.2441-6ba9522) (64bit release build for Linux) (Aug 14 2026 12:08:01)",
+   "CUBRIDVER": "CUBRID 11.5.0 (11.5.0.2490-17a7c58) (64bit release build for Linux) (Aug 27 2026 12:38:43)",
    "CUBRID_DATABASES": "$CUBRID_DATABASES",
    "CUBRID_DBMT": "$CUBRID",
    "HOSTMONTAB0": "OFF",

@@ -7,20 +7,6 @@
             {
                "lastupdate": "<date>",
                "owner": "cubrid",
-               "path": "$CUBRID/log/broker/error_log/query_editor_1.err",
-               "size": "<volatile>",
-               "type": "error"
-            },
-            {
-               "lastupdate": "<date>",
-               "owner": "cubrid",
-               "path": "$CUBRID/log/broker/error_log/query_editor_2.err",
-               "size": "<volatile>",
-               "type": "error"
-            },
-            {
-               "lastupdate": "<date>",
-               "owner": "cubrid",
                "path": "$CUBRID/log/broker/sql_log/query_editor_1.sql.log",
                "size": "<volatile>",
                "type": "script"

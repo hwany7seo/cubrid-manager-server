@@ -680,14 +680,24 @@ def make_loaddb_input(tmpdir):
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def demodb_is_up():
+    return subprocess.call(["pgrep", "-f", "^cub_server demodb$"],
+                           stdout=subprocess.DEVNULL) == 0
+
+
 def wait_for_mon_data(timeout=120):
-    """Wait until the first monitoring sample has been collected.
+    """Wait until the monitoring gather has registered the volumes.
 
     set_mon_interval resizes vol_mon, and that file is only created once a
     gather run has registered the volumes of a database. Called straight after
     a restart it would find no file and fail, and the failed reset_meta leaves
     the meta inconsistent for good, so the run has to wait for the first sample
     before it touches any of the monitoring cases.
+
+    The volumes come from spacedb, so they are only registered while the
+    database is up. With demodb down the gather still writes db_mon and leaves
+    k_total_vol_num at 0 for good -- waiting the full timeout would only delay
+    the run before the same failure, so that case is reported at once.
     """
     meta = os.path.join(CUBRID, "var", "manager", "mon_data", "meta.json")
     deadline = time.time() + timeout
@@ -698,6 +708,12 @@ def wait_for_mon_data(timeout=120):
                     return True
         except (IOError, ValueError):
             pass
+        if not demodb_is_up():
+            print("\033[33mdemodb is not running, so the monitoring gather "
+                  "cannot register its volumes: set_mon_interval and the "
+                  "volume cases of get_mon_statistic will fail. Start demodb "
+                  "and run again.\033[0m")
+            return False
         time.sleep(2)
     print("\033[33mno monitoring data collected within %d s; the "
           "set_mon_interval and get_mon_statistic cases will fail. Check "
@@ -882,6 +898,16 @@ def restart_services():
     # it when cubrid.conf lists it, so ask for it explicitly.
     subprocess.call([cubrid_bin, "server", "start", "demodb"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # And check that it really came up. Everything after this assumes it did:
+    # the monitoring gather only registers volumes while the database is up, so
+    # a silent failure here turns into a two minute wait and five failed cases
+    # much later, where the cause is no longer visible.
+    deadline = time.time() + 60
+    while time.time() < deadline and not demodb_is_up():
+        time.sleep(1)
+    if not demodb_is_up():
+        print("\033[31mdemodb did not start; run 'cubrid server start demodb' "
+              "by hand to see why.\033[0m")
     wait_for_manager()
 
 
