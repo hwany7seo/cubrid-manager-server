@@ -132,30 +132,43 @@ jobs:
             ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-
             ccache-${{ runner.os }}-
 
-      # Two things about the libtbb external project have to be adjusted for
-      # this runner, and both are patched into the checked out engine source so
-      # that the result is visible in the log.
+      # The engine does not build with the runner's GCC 13 as it stands, so the
+      # checked out engine source is adjusted here. Everything is patched rather
+      # than passed as a flag so that the change is visible in the log, and each
+      # one belongs upstream in CUBRID/cubrid.
       #
-      # 1. It builds with a bare "make -j", meaning unlimited jobs.
-      # 2. oneTBB compiles with TBB_STRICT=ON by default, which adds -Werror.
-      #    GCC 13 raises a false -Wstringop-overflow inside its own
-      #    <atomic> for tbb's concurrent_monitor, so every strict build stops at
-      #    "writing 1 byte into a region of size 0 overflows the destination".
-      #    The warning is about libstdc++ internals, not about CUBRID code.
-      #
-      # Both belong upstream in CUBRID/cubrid, 3rdparty/CMakeLists.txt.
-      - name: Adjust the libtbb external project for this runner
+      # 1. libtbb runs a bare "make -j" (unlimited jobs).
+      # 2. libtbb compiles with TBB_STRICT=ON, which adds -Werror. GCC 13 raises
+      #    a false -Wstringop-overflow inside its own <atomic> for tbb's
+      #    concurrent_monitor, so a strict build cannot finish.
+      # 3. The engine itself adds a bare -Werror in Release builds
+      #    (CMakeLists.txt:613-614). GCC 13 reports things older compilers did
+      #    not, such as -Waddress on "if (err_buf_p->err_msg)" where err_msg is
+      #    a char[1024] and can never be null (cubrid-cci cas_cci.c:5910,6570).
+      #    The warnings stay visible; only the promotion to errors is dropped,
+      #    and -Werror=format-security is kept.
+      - name: Adjust the engine build for this runner
         working-directory: cubrid
         run: |
           set -euo pipefail
-          f=3rdparty/CMakeLists.txt
+
+          tb=3rdparty/CMakeLists.txt
           sed -i -E "s/(BUILD_COMMAND[[:space:]]+make) -j$/\1 -j$(nproc)/;
                      s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/;
-                     s/(set\(LIBTBB_CONFIGURE) /\1 -DTBB_STRICT=OFF /" "$f"
-          echo "libtbb build commands and configure options are now:"
-          grep -n -E 'LIBTBB_CONFIGURE|make -j' "$f" | cut -c1-200 | sed 's/^/  /'
-          grep -q 'TBB_STRICT=OFF' "$f" \
+                     s/(set\(LIBTBB_CONFIGURE) /\1 -DTBB_STRICT=OFF /" "$tb"
+          grep -q 'TBB_STRICT=OFF' "$tb" \
             || { echo "TBB_STRICT=OFF was not applied"; exit 1; }
+          echo "libtbb:"
+          grep -n -E 'LIBTBB_CONFIGURE|make -j' "$tb" | cut -c1-120 | sed 's/^/  /'
+
+          # Only the bare "-Werror " is dropped; "-Werror=format-security" has
+          # no trailing space after -Werror and is left alone.
+          sed -i 's/-Wall -Werror -Wformat/-Wall -Wformat/g' CMakeLists.txt
+          if grep -q -- '-Wall -Werror' CMakeLists.txt; then
+            echo "a bare -Werror is still there"; exit 1
+          fi
+          echo "engine warning flags:"
+          grep -n -- '-Werror' CMakeLists.txt | cut -c1-120 | sed 's/^/  /'
 
       # CMakeLists.txt:767-773 points JAVA_HOME at <build>/vm/jdk8 and then calls
       # find_package(JNI). That directory is downloaded by the pl_install_jdk
