@@ -104,6 +104,7 @@ jobs:
             git gcc gcc-c++ make bison flex \
             libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
+            libstdc++-static \
             java-1.8.0-openjdk-devel ant \
             python3 procps-ng diffutils
 
@@ -241,16 +242,21 @@ jobs:
           if [ $rc -ne 0 ]; then
             cd cubrid
             stamp=build_x86_64_release/3rdparty/Stamp
-            echo "===== external projects that did not finish their build step"
+            # Only projects that got as far as configuring are interesting; the
+            # ones ninja had not reached yet have no stamps at all and would
+            # otherwise be listed as if they had failed.
+            echo "===== external projects that configured but did not build"
             failed=""
             for d in "$stamp"/*/; do
               n=$(basename "$d")
+              [ -f "$d/$n-configure" ] || continue
               if [ ! -f "$d/$n-build" ]; then
                 echo "  $n"
                 failed="$failed $n"
               fi
             done
-            [ -n "$failed" ] || echo "  (all finished; the failure is in the engine itself)"
+            [ -n "$failed" ] \
+              || echo "  (none; look for a FAILED: line in the ninja output above)"
 
             for n in $failed; do
               for f in "$stamp/$n/$n-build-err.log" "$stamp/$n/$n-build-out.log"; do
