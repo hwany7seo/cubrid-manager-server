@@ -132,30 +132,30 @@ jobs:
             ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-
             ccache-${{ runner.os }}-
 
-      # 3rdparty/CMakeLists.txt builds libtbb with a bare "make -j", which means
-      # unlimited jobs. On a two core runner that starts dozens of g++ processes
-      # at once and the box runs out of memory. A PATH shim is not reliable here
-      # because ExternalProject may resolve the program itself, so the checked
-      # out engine source is patched instead: it is visible in the log and there
-      # is no doubt about whether it took effect.
+      # Two things about the libtbb external project have to be adjusted for
+      # this runner, and both are patched into the checked out engine source so
+      # that the result is visible in the log.
       #
-      # The real fix belongs upstream, in CUBRID/cubrid:
-      #   BUILD_COMMAND make -j        ->  make -j${CMAKE_BUILD_PARALLEL_LEVEL}
-      # libtbb is the only external project that does this; every other one
-      # runs a plain "make".
-      - name: Cap the libtbb build parallelism
+      # 1. It builds with a bare "make -j", meaning unlimited jobs.
+      # 2. oneTBB compiles with TBB_STRICT=ON by default, which adds -Werror.
+      #    GCC 13 raises a false -Wstringop-overflow inside its own
+      #    <atomic> for tbb's concurrent_monitor, so every strict build stops at
+      #    "writing 1 byte into a region of size 0 overflows the destination".
+      #    The warning is about libstdc++ internals, not about CUBRID code.
+      #
+      # Both belong upstream in CUBRID/cubrid, 3rdparty/CMakeLists.txt.
+      - name: Adjust the libtbb external project for this runner
         working-directory: cubrid
         run: |
           set -euo pipefail
           f=3rdparty/CMakeLists.txt
-          before=$(grep -c -- 'make -j$\|make -j install$' "$f" || true)
           sed -i -E "s/(BUILD_COMMAND[[:space:]]+make) -j$/\1 -j$(nproc)/;
-                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/" "$f"
-          echo "patched $before unbounded make invocations to -j$(nproc):"
-          grep -n -- 'make -j' "$f" | sed 's/^/  /'
-          if [ "$before" -eq 0 ]; then
-            echo "::notice::no unbounded 'make -j' left in $f; upstream may have fixed it"
-          fi
+                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/;
+                     s/(set\(LIBTBB_CONFIGURE) /\1 -DTBB_STRICT=OFF /" "$f"
+          echo "libtbb build commands and configure options are now:"
+          grep -n -E 'LIBTBB_CONFIGURE|make -j' "$f" | cut -c1-200 | sed 's/^/  /'
+          grep -q 'TBB_STRICT=OFF' "$f" \
+            || { echo "TBB_STRICT=OFF was not applied"; exit 1; }
 
       # CMakeLists.txt:767-773 points JAVA_HOME at <build>/vm/jdk8 and then calls
       # find_package(JNI). That directory is downloaded by the pl_install_jdk
@@ -204,6 +204,29 @@ jobs:
           echo "  jni.h=$jnih"
           echo "  jni_md.h=$jnimdh"
 
+          # ExternalProject sends its output to log files, so a failure prints
+          # only "Command failed: N". Dump those logs here, in the same step, so
+          # the cause sits next to the error instead of further down the run.
+          dump_ep_logs () {
+            echo "::group::3rdparty ExternalProject logs"
+            for f in $(find build_x86_64_release/3rdparty/Stamp -name '*.log' \
+                       -newermt '-30 minutes' 2>/dev/null | sort); do
+              [ -s "$f" ] || continue
+              echo "===== $f"
+              tail -n 60 "$f"
+            done
+            echo "::endgroup::"
+            echo "===== lines that look like the cause"
+            find build_x86_64_release/3rdparty/Stamp -name '*.log' 2>/dev/null \
+              | xargs grep -h -i -E 'error|fatal|Killed|signal 9|virtual memory|No space' 2>/dev/null \
+              | sort -u | head -30 || echo "  nothing matched"
+            echo "===== out of memory kills, if any"
+            dmesg 2>/dev/null | grep -i -m5 'killed process' || echo "  none visible"
+            echo "===== disk"
+            df -h . | tail -1
+          }
+
+          set +e
           ./build.sh -m release -j "$jdk8" -p "$GITHUB_WORKSPACE/CUBRID" \
             -c "-DJAVA_AWT_LIBRARY=$libawt \
                 -DJAVA_JVM_LIBRARY=$libjvm \
@@ -211,6 +234,13 @@ jobs:
                 -DJAVA_INCLUDE_PATH2=$(dirname "$jnimdh") \
                 -DJAVA_AWT_INCLUDE_PATH=$(dirname "$jnih")" \
             build
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            dump_ep_logs
+            echo "build.sh exited $rc"
+            exit $rc
+          fi
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
 
@@ -272,8 +302,19 @@ jobs:
         working-directory: cubrid/cubridmanager/server/test
         run: |
           set -uo pipefail
-          version='${{ steps.version.outputs.short }}'
           status='${{ steps.run.outputs.status }}'
+          if [ ! -f run.log ]; then
+            # The suite never ran: something before it failed, usually the build.
+            verdict='⚠️ NOT RUN'
+            echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+            {
+              echo "## CMS API test — $verdict"
+              echo
+              echo "The suite did not run; an earlier step failed. See the build"
+              echo "step for the cause."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$status" = "0" ]; then
             verdict='✅ PASS'
           else
