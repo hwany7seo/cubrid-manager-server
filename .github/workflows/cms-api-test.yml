@@ -154,9 +154,8 @@ jobs:
       # find_package(JNI). That directory is downloaded by the pl_install_jdk
       # build target, so at configure time it does not exist yet and FindJNI
       # falls back to whatever JDK is installed system wide. There is none here
-      # on purpose -- the build has to be JDK 8 - so point FindJNI straight at
-      # the JDK 8 that setup-java unpacked. The paths are searched rather than
-      # written out, so a different JDK layout does not break this.
+      # on purpose -- the build has to be JDK 8 -- so point FindJNI straight at
+      # the JDK 8 that setup-java unpacked.
       - name: Build CUBRID with this manager server
         working-directory: cubrid
         run: |
@@ -166,15 +165,33 @@ jobs:
           jdk8=${JAVA_HOME_8_X64:-$JAVA_HOME}
           java -version 2>&1 | head -1
           echo "JDK 8 for JNI: $jdk8"
-          libawt=$(find "$jdk8" -name libawt.so  -print -quit)
-          libjvm=$(find "$jdk8" -name libjvm.so  -print -quit)
-          jnih=$(find "$jdk8" -name jni.h        -print -quit)
-          jnimdh=$(find "$jdk8" -name jni_md.h   -print -quit)
-          for v in libawt libjvm jnih jnimdh; do
-            eval "val=\$$v"
-            [ -n "$val" ] || { echo "could not find $v under $jdk8"; exit 1; }
-            echo "  $v=$val"
-          done
+
+          libjvm=$(find "$jdk8" -name libjvm.so -print -quit)
+          jnih=$(find "$jdk8"   -name jni.h     -print -quit)
+          jnimdh=$(find "$jdk8" -name jni_md.h  -print -quit)
+          if [ -z "$libjvm" ] || [ -z "$jnih" ] || [ -z "$jnimdh" ]; then
+            echo "the JDK at $jdk8 is missing what JNI needs; it contains:"
+            ls -l "$jdk8"
+            find "$jdk8" -name '*.so' -printf '  %p\n' | head -40
+            find "$jdk8" -name 'jni*.h' -printf '  %p\n' | head -10
+            exit 1
+          fi
+
+          # FindJNI asks for AWT as well, but on Linux the engine only consumes
+          # the include directories: CMakeLists.txt uses JNI_FOUND to set
+          # JAVA_INC, and JVM_LIBS is a Windows only branch. Some JDK 8 builds
+          # ship no libawt.so, so when it is absent the variable is pointed at
+          # libjvm.so purely to satisfy the REQUIRED check.
+          libawt=$(find "$jdk8" -name libawt.so -print -quit)
+          if [ -z "$libawt" ]; then
+            echo "no libawt.so in this JDK; satisfying FindJNI with libjvm.so"
+            libawt=$libjvm
+          fi
+          echo "  libjvm=$libjvm"
+          echo "  libawt=$libawt"
+          echo "  jni.h=$jnih"
+          echo "  jni_md.h=$jnimdh"
+
           ./build.sh -m release -j "$jdk8" -p "$GITHUB_WORKSPACE/CUBRID" \
             -c "-DJAVA_AWT_LIBRARY=$libawt \
                 -DJAVA_JVM_LIBRARY=$libjvm \
