@@ -134,21 +134,28 @@ jobs:
 
       # 3rdparty/CMakeLists.txt builds libtbb with a bare "make -j", which means
       # unlimited jobs. On a two core runner that starts dozens of g++ processes
-      # at once, the box runs out of memory and make dies with "Command failed:
-      # 2". This shim appends a bounded -j after the caller's arguments, and the
-      # later -j is the one make honours.
-      - name: Cap make parallelism
+      # at once and the box runs out of memory. A PATH shim is not reliable here
+      # because ExternalProject may resolve the program itself, so the checked
+      # out engine source is patched instead: it is visible in the log and there
+      # is no doubt about whether it took effect.
+      #
+      # The real fix belongs upstream, in CUBRID/cubrid:
+      #   BUILD_COMMAND make -j        ->  make -j${CMAKE_BUILD_PARALLEL_LEVEL}
+      # libtbb is the only external project that does this; every other one
+      # runs a plain "make".
+      - name: Cap the libtbb build parallelism
+        working-directory: cubrid
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/bin"
-          real=$(command -v make)
-          cat > "$HOME/bin/make" <<EOF
-          #!/bin/sh
-          exec $real "\$@" -j$(nproc)
-          EOF
-          chmod +x "$HOME/bin/make"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-          echo "make jobs capped at $(nproc)"
+          f=3rdparty/CMakeLists.txt
+          before=$(grep -c -- 'make -j$\|make -j install$' "$f" || true)
+          sed -i -E "s/(BUILD_COMMAND[[:space:]]+make) -j$/\1 -j$(nproc)/;
+                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/" "$f"
+          echo "patched $before unbounded make invocations to -j$(nproc):"
+          grep -n -- 'make -j' "$f" | sed 's/^/  /'
+          if [ "$before" -eq 0 ]; then
+            echo "::notice::no unbounded 'make -j' left in $f; upstream may have fixed it"
+          fi
 
       # CMakeLists.txt:767-773 points JAVA_HOME at <build>/vm/jdk8 and then calls
       # find_package(JNI). That directory is downloaded by the pl_install_jdk
@@ -167,6 +174,8 @@ jobs:
           # told to, so resolve it first.
           jdk8=$(readlink -f "${JAVA_HOME_8_X64:-$JAVA_HOME}")
           java -version 2>&1 | head -1
+          echo "make in use: $(command -v make) ($(make --version | head -1))"
+          echo "cores: $(nproc), memory: $(free -g | awk '/^Mem:/{print $2"G"}')"
           echo "JDK 8 for JNI: $jdk8"
 
           libjvm=$(find -L "$jdk8" -name libjvm.so -print -quit)
