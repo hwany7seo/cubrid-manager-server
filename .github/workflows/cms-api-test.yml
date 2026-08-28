@@ -113,7 +113,15 @@ jobs:
             build-essential cmake ninja-build ccache \
             autoconf automake libtool bison flex \
             libncurses-dev libexpat1-dev zlib1g-dev \
-            default-jdk ant systemtap-sdt-dev rsync
+            ant systemtap-sdt-dev rsync
+
+      # The engine builds against JDK 8; a newer default JDK on the runner
+      # produces class files the build will not accept.
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
 
       - name: Cache the compiler output
         uses: actions/cache@v4
@@ -124,16 +132,48 @@ jobs:
             ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-
             ccache-${{ runner.os }}-
 
+      # 3rdparty/CMakeLists.txt builds libtbb with a bare "make -j", which means
+      # unlimited jobs. On a two core runner that starts dozens of g++ processes
+      # at once, the box runs out of memory and make dies with "Command failed:
+      # 2". This shim appends a bounded -j after the caller's arguments, and the
+      # later -j is the one make honours.
+      - name: Cap make parallelism
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          real=$(command -v make)
+          cat > "$HOME/bin/make" <<EOF
+          #!/bin/sh
+          exec $real "\$@" -j$(nproc)
+          EOF
+          chmod +x "$HOME/bin/make"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          echo "make jobs capped at $(nproc)"
+
       - name: Build CUBRID with this manager server
         working-directory: cubrid
         run: |
           set -euo pipefail
-          export JAVA_HOME=${JAVA_HOME:-$(dirname $(dirname $(readlink -f $(which javac))))}
           export CCACHE_DIR=$HOME/.ccache
           export PATH="/usr/lib/ccache:$PATH"
-          ./build.sh -m release -p "$GITHUB_WORKSPACE/CUBRID" build
+          java -version 2>&1 | head -1
+          ./build.sh -m release -j "$JAVA_HOME" -p "$GITHUB_WORKSPACE/CUBRID" build
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
+
+      # ExternalProject hides its output in log files, so a failure above shows
+      # only "Command failed". Print the tails so the run is diagnosable.
+      - name: Show 3rdparty build logs on failure
+        if: failure()
+        working-directory: cubrid
+        run: |
+          set -uo pipefail
+          for f in $(find build_x86_64_release/3rdparty/Stamp -name '*-build-*.log' 2>/dev/null); do
+            echo "===== $f"
+            tail -n 40 "$f"
+          done
+          echo "===== out of memory kills, if any"
+          dmesg 2>/dev/null | grep -i -m5 'killed process' || echo "  none visible"
 
       # The suite runs every case against demodb: it reads its volumes, unloads
       # its classes and opens transactions on it. The demo data has to be there,
