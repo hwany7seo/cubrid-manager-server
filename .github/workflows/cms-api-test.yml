@@ -162,18 +162,21 @@ jobs:
           set -euo pipefail
           export CCACHE_DIR=$HOME/.ccache
           export PATH="/usr/lib/ccache:$PATH"
-          jdk8=${JAVA_HOME_8_X64:-$JAVA_HOME}
+          # The toolcache entry is a symlink to /usr/lib/jvm/temurin-8-jdk-amd64,
+          # and find does not descend into a symlinked directory unless it is
+          # told to, so resolve it first.
+          jdk8=$(readlink -f "${JAVA_HOME_8_X64:-$JAVA_HOME}")
           java -version 2>&1 | head -1
           echo "JDK 8 for JNI: $jdk8"
 
-          libjvm=$(find "$jdk8" -name libjvm.so -print -quit)
-          jnih=$(find "$jdk8"   -name jni.h     -print -quit)
-          jnimdh=$(find "$jdk8" -name jni_md.h  -print -quit)
+          libjvm=$(find -L "$jdk8" -name libjvm.so -print -quit)
+          jnih=$(find -L "$jdk8"   -name jni.h     -print -quit)
+          jnimdh=$(find -L "$jdk8" -name jni_md.h  -print -quit)
           if [ -z "$libjvm" ] || [ -z "$jnih" ] || [ -z "$jnimdh" ]; then
             echo "the JDK at $jdk8 is missing what JNI needs; it contains:"
-            ls -l "$jdk8"
-            find "$jdk8" -name '*.so' -printf '  %p\n' | head -40
-            find "$jdk8" -name 'jni*.h' -printf '  %p\n' | head -10
+            ls -l "$jdk8/"
+            find -L "$jdk8" -name '*.so' -printf '  %p\n' | head -40
+            find -L "$jdk8" -name 'jni*.h' -printf '  %p\n' | head -10
             exit 1
           fi
 
@@ -182,7 +185,7 @@ jobs:
           # JAVA_INC, and JVM_LIBS is a Windows only branch. Some JDK 8 builds
           # ship no libawt.so, so when it is absent the variable is pointed at
           # libjvm.so purely to satisfy the REQUIRED check.
-          libawt=$(find "$jdk8" -name libawt.so -print -quit)
+          libawt=$(find -L "$jdk8" -name libawt.so -print -quit)
           if [ -z "$libawt" ]; then
             echo "no libawt.so in this JDK; satisfying FindJNI with libjvm.so"
             libawt=$libjvm
