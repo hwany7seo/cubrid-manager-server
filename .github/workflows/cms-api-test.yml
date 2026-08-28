@@ -104,7 +104,7 @@ jobs:
             git gcc gcc-c++ make bison flex \
             libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
-            libstdc++-static \
+            elfutils-libelf-devel libstdc++-static \
             glibc-gconv-extra glibc-langpack-ko glibc-langpack-en \
             java-1.8.0-openjdk-devel ant \
             python3 procps-ng diffutils
@@ -143,6 +143,10 @@ jobs:
           # library that gcc-c++ brings.
           ls /usr/lib/gcc/x86_64-redhat-linux/*/libstdc++.a >/dev/null \
             || { echo "libstdc++.a is missing"; exit 1; }
+          # src/base/dynamic_load.h includes <nlist.h> on Linux, which ships in
+          # elfutils-libelf-devel rather than with the compiler.
+          test -f /usr/include/nlist.h \
+            || { echo "nlist.h is missing"; exit 1; }
 
       - name: Install CMake ${{ env.CMAKE_VERSION }}
         run: |
