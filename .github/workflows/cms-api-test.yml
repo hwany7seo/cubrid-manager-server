@@ -235,22 +235,35 @@ jobs:
           rc=$?
           set -e
 
-          # ExternalProject sends its output to log files, so a failure prints
-          # only "Command failed: N". Dump those logs here, in the same step, so
-          # the cause sits next to the error instead of further down the run.
+          # ExternalProject sends its output to log files, so ninja only says
+          # "build stopped: subcommand failed". Work out which project stopped
+          # and print its error log in full, not inside a collapsed group.
           if [ $rc -ne 0 ]; then
             cd cubrid
-            echo "::group::3rdparty ExternalProject logs"
-            for f in $(find build_x86_64_release/3rdparty/Stamp -name '*.log' 2>/dev/null | sort); do
-              [ -s "$f" ] || continue
-              echo "===== $f"
-              tail -n 60 "$f"
+            stamp=build_x86_64_release/3rdparty/Stamp
+            echo "===== external projects that did not finish their build step"
+            failed=""
+            for d in "$stamp"/*/; do
+              n=$(basename "$d")
+              if [ ! -f "$d/$n-build" ]; then
+                echo "  $n"
+                failed="$failed $n"
+              fi
             done
-            echo "::endgroup::"
-            echo "===== lines that look like the cause"
-            find build_x86_64_release/3rdparty/Stamp -name '*.log' 2>/dev/null \
-              | xargs grep -h -i -E 'error|fatal|Killed|signal 9|virtual memory|No space' 2>/dev/null \
-              | sort -u | head -30 || echo "  nothing matched"
+            [ -n "$failed" ] || echo "  (all finished; the failure is in the engine itself)"
+
+            for n in $failed; do
+              for f in "$stamp/$n/$n-build-err.log" "$stamp/$n/$n-build-out.log"; do
+                [ -s "$f" ] || continue
+                echo "===== $f (last 80 lines)"
+                tail -n 80 "$f"
+              done
+            done
+
+            echo "===== compiler errors across all 3rdparty logs"
+            grep -h -E 'error:|fatal error|Error [0-9]+|cannot find|No such file or directory' \
+              "$stamp"/*/*.log 2>/dev/null | sort -u | head -30 \
+              || echo "  none matched"
             echo "===== disk"; df -h . | tail -1
             echo "build.sh exited $rc"
             exit $rc
