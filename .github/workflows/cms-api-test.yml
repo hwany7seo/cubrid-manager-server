@@ -3,6 +3,21 @@ name: CMS API test
 # Builds CUBRID with this PR's manager server and runs the API test suite
 # (server/test, task_result_check) against it.
 #
+# The build runs in a Rocky Linux 8.10 container rather than on the runner
+# image, so that CUBRID is compiled with the GCC 8 toolchain the product
+# actually targets. On the runner's GCC 13 the engine does not compile at all:
+# it promotes warnings to errors, and GCC 13 reports things GCC 8 does not --
+# -Waddress on a char[1024] member in cubrid-cci, and -Wstringop-overflow
+# inside libstdc++'s own <atomic> while building libtbb. Matching the product
+# toolchain removes that whole class of failure instead of suppressing the
+# warnings one at a time.
+#
+# A container job runs as root, but CUBRID is meant to be run by its own
+# unprivileged owner, so a "cubrid" user is created and the build, the database
+# and the test all run as that user. Only the steps that talk to the runner
+# itself -- installing packages, checking out, writing the step summary -- stay
+# as root.
+#
 # The result never blocks a merge: the job finishes green either way and says
 # PASS or FAIL in the job summary and in a comment on the PR. To make it
 # blocking instead, replace the "exit 0" at the end of the test step with
@@ -12,8 +27,8 @@ name: CMS API test
 # TRYING IT OUT IN A FORK
 #   The push trigger below runs the whole thing on any branch, but only when
 #   the repository is not CUBRID/cubrid-manager-server -- pushing a branch to
-#   the real repository must not start a three hour build. So in a fork it is
-#   enough to push the branch that carries this file.
+#   the real repository must not start a long build. So in a fork it is enough
+#   to push the branch that carries this file.
 #
 #   To build against a fork of the engine as well, set the repository variable
 #   ENGINE_REPO (Settings > Secrets and variables > Actions > Variables) or
@@ -52,6 +67,8 @@ env:
   ENGINE_REPO: ${{ github.event.inputs.engine_repo || vars.ENGINE_REPO || 'CUBRID/cubrid' }}
   ENGINE_REF: ${{ github.event.inputs.engine_ref || vars.ENGINE_REF || 'develop' }}
   TEST_SET: task_result_check.txt
+  # Rocky 8 ships CMake 3.20 and the engine asks for 3.21, so one is fetched.
+  CMAKE_VERSION: 3.28.3
 
 jobs:
   cms-api-test:
@@ -62,8 +79,37 @@ jobs:
       github.repository != 'CUBRID/cubrid-manager-server'
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    container:
+      image: rockylinux/rockylinux:8.10
 
     steps:
+      # First, because actions/checkout needs git inside the container; without
+      # it the action falls back to a tarball download and the submodules the
+      # engine build needs would not come along.
+      - name: Install the toolchain and test dependencies
+        run: |
+          set -euo pipefail
+          dnf -y install epel-release
+          dnf -y install \
+            git gcc gcc-c++ make ninja-build bison flex \
+            libtool autoconf automake patch file which rsync tar gzip xz curl \
+            ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
+            java-1.8.0-openjdk-devel ant \
+            python3 procps-ng diffutils
+          gcc --version | head -1
+          # procps-ng matters: the test runner finds and kills its helper
+          # processes with pgrep/pkill, which a minimal image does not have.
+          command -v pgrep >/dev/null || { echo "pgrep is missing"; exit 1; }
+
+      - name: Install CMake ${{ env.CMAKE_VERSION }}
+        run: |
+          set -euo pipefail
+          url=https://github.com/Kitware/CMake/releases/download
+          curl -fsSL "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
+            | tar xz -C /opt
+          echo "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin" >> "$GITHUB_PATH"
+          "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin/cmake" --version | head -1
+
       # The manager server is a submodule of CUBRID/cubrid at path
       # "cubridmanager", and it is built as part of the engine. So the engine
       # is what gets checked out, and this PR replaces that submodule.
@@ -105,125 +151,66 @@ jobs:
               './run_tests.sh -a $short task_result_check.txt' on a $short build and commit them"
           fi
 
-      - name: Install build and test dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ccache \
-            autoconf automake libtool bison flex \
-            libncurses-dev libexpat1-dev zlib1g-dev \
-            ant systemtap-sdt-dev rsync
-
-      # The engine builds against JDK 8; a newer default JDK on the runner
-      # produces class files the build will not accept.
-      - name: Set up JDK 8
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '8'
-
-      - name: Cache the compiler output
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ env.ENGINE_REF }}-
-            ccache-${{ runner.os }}-
-
-      # The engine does not build with the runner's GCC 13 as it stands, so the
-      # checked out engine source is adjusted here. Everything is patched rather
-      # than passed as a flag so that the change is visible in the log, and each
-      # one belongs upstream in CUBRID/cubrid.
-      #
-      # 1. libtbb runs a bare "make -j" (unlimited jobs).
-      # 2. libtbb compiles with TBB_STRICT=ON, which adds -Werror. GCC 13 raises
-      #    a false -Wstringop-overflow inside its own <atomic> for tbb's
-      #    concurrent_monitor, so a strict build cannot finish.
-      # 3. The engine itself adds a bare -Werror in Release builds
-      #    (CMakeLists.txt:613-614). GCC 13 reports things older compilers did
-      #    not, such as -Waddress on "if (err_buf_p->err_msg)" where err_msg is
-      #    a char[1024] and can never be null (cubrid-cci cas_cci.c:5910,6570).
-      #    The warnings stay visible; only the promotion to errors is dropped,
-      #    and -Werror=format-security is kept.
-      - name: Adjust the engine build for this runner
+      # libtbb builds with a bare "make -j", meaning unlimited jobs, which on a
+      # small runner starts dozens of compilers at once. That is a resource
+      # matter rather than a toolchain one, so it applies in the container too.
+      # It belongs upstream as "make -j${CMAKE_BUILD_PARALLEL_LEVEL}"; libtbb is
+      # the only external project that does this.
+      - name: Cap the libtbb build parallelism
         working-directory: cubrid
         run: |
           set -euo pipefail
-
-          tb=3rdparty/CMakeLists.txt
+          f=3rdparty/CMakeLists.txt
           sed -i -E "s/(BUILD_COMMAND[[:space:]]+make) -j$/\1 -j$(nproc)/;
-                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/;
-                     s/(set\(LIBTBB_CONFIGURE) /\1 -DTBB_STRICT=OFF /" "$tb"
-          grep -q 'TBB_STRICT=OFF' "$tb" \
-            || { echo "TBB_STRICT=OFF was not applied"; exit 1; }
-          echo "libtbb:"
-          grep -n -E 'LIBTBB_CONFIGURE|make -j' "$tb" | cut -c1-120 | sed 's/^/  /'
+                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/" "$f"
+          grep -n -- 'make -j' "$f" | sed 's/^/  /'
 
-          # Only the bare "-Werror " is dropped; "-Werror=format-security" has
-          # no trailing space after -Werror and is left alone.
-          sed -i 's/-Wall -Werror -Wformat/-Wall -Wformat/g' CMakeLists.txt
-          if grep -q -- '-Wall -Werror' CMakeLists.txt; then
-            echo "a bare -Werror is still there"; exit 1
-          fi
-          echo "engine warning flags:"
-          grep -n -- '-Werror' CMakeLists.txt | cut -c1-120 | sed 's/^/  /'
-
-      # CMakeLists.txt:767-773 points JAVA_HOME at <build>/vm/jdk8 and then calls
-      # find_package(JNI). That directory is downloaded by the pl_install_jdk
-      # build target, so at configure time it does not exist yet and FindJNI
-      # falls back to whatever JDK is installed system wide. There is none here
-      # on purpose -- the build has to be JDK 8 -- so point FindJNI straight at
-      # the JDK 8 that setup-java unpacked.
-      - name: Build CUBRID with this manager server
-        working-directory: cubrid
+      # Everything from here on belongs to the cubrid user: the install tree,
+      # the database and the processes the suite starts and kills. The checkout
+      # steps ran as root, so the workspace is handed over as well.
+      - name: Create the cubrid user
         run: |
           set -euo pipefail
-          export CCACHE_DIR=$HOME/.ccache
-          export PATH="/usr/lib/ccache:$PATH"
-          # The toolcache entry is a symlink to /usr/lib/jvm/temurin-8-jdk-amd64,
-          # and find does not descend into a symlinked directory unless it is
-          # told to, so resolve it first.
-          jdk8=$(readlink -f "${JAVA_HOME_8_X64:-$JAVA_HOME}")
+          useradd -m -s /bin/bash cubrid
+          mkdir -p "$GITHUB_WORKSPACE/CUBRID"
+          chown -R cubrid:cubrid "$GITHUB_WORKSPACE"
+          echo "workspace now owned by $(stat -c %U "$GITHUB_WORKSPACE")"
+
+      - name: Build CUBRID with this manager server
+        run: |
+          set -euo pipefail
+          # The container's JDK 8 is a full system JDK, so find_package(JNI)
+          # locates AWT and JVM on its own; no cache variables are needed.
+          JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
+          echo "JAVA_HOME=$JAVA_HOME"
           java -version 2>&1 | head -1
-          echo "make in use: $(command -v make) ($(make --version | head -1))"
+          test -f "$JAVA_HOME/include/jni.h" \
+            || { echo "no jni.h under $JAVA_HOME"; exit 1; }
           echo "cores: $(nproc), memory: $(free -g | awk '/^Mem:/{print $2"G"}')"
-          echo "JDK 8 for JNI: $jdk8"
 
-          libjvm=$(find -L "$jdk8" -name libjvm.so -print -quit)
-          jnih=$(find -L "$jdk8"   -name jni.h     -print -quit)
-          jnimdh=$(find -L "$jdk8" -name jni_md.h  -print -quit)
-          if [ -z "$libjvm" ] || [ -z "$jnih" ] || [ -z "$jnimdh" ]; then
-            echo "the JDK at $jdk8 is missing what JNI needs; it contains:"
-            ls -l "$jdk8/"
-            find -L "$jdk8" -name '*.so' -printf '  %p\n' | head -40
-            find -L "$jdk8" -name 'jni*.h' -printf '  %p\n' | head -10
-            exit 1
-          fi
+          # The build runs as cubrid. It is written to a file rather than
+          # squeezed into a quoted -c argument so that it stays readable.
+          cat > /tmp/build-as-cubrid.sh <<'EOS'
+          set -euo pipefail
+          cd "$WORKSPACE/cubrid"
+          ./build.sh -m release -j "$JAVA_HOME" -p "$WORKSPACE/CUBRID" build
+          EOS
+          chmod 0755 /tmp/build-as-cubrid.sh
 
-          # FindJNI asks for AWT as well, but on Linux the engine only consumes
-          # the include directories: CMakeLists.txt uses JNI_FOUND to set
-          # JAVA_INC, and JVM_LIBS is a Windows only branch. Some JDK 8 builds
-          # ship no libawt.so, so when it is absent the variable is pointed at
-          # libjvm.so purely to satisfy the REQUIRED check.
-          libawt=$(find -L "$jdk8" -name libawt.so -print -quit)
-          if [ -z "$libawt" ]; then
-            echo "no libawt.so in this JDK; satisfying FindJNI with libjvm.so"
-            libawt=$libjvm
-          fi
-          echo "  libjvm=$libjvm"
-          echo "  libawt=$libawt"
-          echo "  jni.h=$jnih"
-          echo "  jni_md.h=$jnimdh"
+          set +e
+          runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
+            JAVA_HOME="$JAVA_HOME" WORKSPACE="$GITHUB_WORKSPACE" \
+            bash /tmp/build-as-cubrid.sh
+          rc=$?
+          set -e
 
           # ExternalProject sends its output to log files, so a failure prints
           # only "Command failed: N". Dump those logs here, in the same step, so
           # the cause sits next to the error instead of further down the run.
-          dump_ep_logs () {
+          if [ $rc -ne 0 ]; then
+            cd cubrid
             echo "::group::3rdparty ExternalProject logs"
-            for f in $(find build_x86_64_release/3rdparty/Stamp -name '*.log' \
-                       -newermt '-30 minutes' 2>/dev/null | sort); do
+            for f in $(find build_x86_64_release/3rdparty/Stamp -name '*.log' 2>/dev/null | sort); do
               [ -s "$f" ] || continue
               echo "===== $f"
               tail -n 60 "$f"
@@ -233,43 +220,12 @@ jobs:
             find build_x86_64_release/3rdparty/Stamp -name '*.log' 2>/dev/null \
               | xargs grep -h -i -E 'error|fatal|Killed|signal 9|virtual memory|No space' 2>/dev/null \
               | sort -u | head -30 || echo "  nothing matched"
-            echo "===== out of memory kills, if any"
-            dmesg 2>/dev/null | grep -i -m5 'killed process' || echo "  none visible"
-            echo "===== disk"
-            df -h . | tail -1
-          }
-
-          set +e
-          ./build.sh -m release -j "$jdk8" -p "$GITHUB_WORKSPACE/CUBRID" \
-            -c "-DJAVA_AWT_LIBRARY=$libawt \
-                -DJAVA_JVM_LIBRARY=$libjvm \
-                -DJAVA_INCLUDE_PATH=$(dirname "$jnih") \
-                -DJAVA_INCLUDE_PATH2=$(dirname "$jnimdh") \
-                -DJAVA_AWT_INCLUDE_PATH=$(dirname "$jnih")" \
-            build
-          rc=$?
-          set -e
-          if [ $rc -ne 0 ]; then
-            dump_ep_logs
+            echo "===== disk"; df -h . | tail -1
             echo "build.sh exited $rc"
             exit $rc
           fi
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
-
-      # ExternalProject hides its output in log files, so a failure above shows
-      # only "Command failed". Print the tails so the run is diagnosable.
-      - name: Show 3rdparty build logs on failure
-        if: failure()
-        working-directory: cubrid
-        run: |
-          set -uo pipefail
-          for f in $(find build_x86_64_release/3rdparty/Stamp -name '*-build-*.log' 2>/dev/null); do
-            echo "===== $f"
-            tail -n 40 "$f"
-          done
-          echo "===== out of memory kills, if any"
-          dmesg 2>/dev/null | grep -i -m5 'killed process' || echo "  none visible"
 
       # The suite runs every case against demodb: it reads its volumes, unloads
       # its classes and opens transactions on it. The demo data has to be there,
@@ -277,7 +233,9 @@ jobs:
       - name: Create demodb and start the service
         run: |
           set -euo pipefail
-          export CUBRID="$GITHUB_WORKSPACE/CUBRID"
+          cat > /tmp/demodb-as-cubrid.sh <<'EOS'
+          set -euo pipefail
+          export CUBRID="$WORKSPACE/CUBRID"
           export CUBRID_DATABASES="$CUBRID/databases"
           export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
@@ -286,24 +244,38 @@ jobs:
           cubrid service start
           cubrid server start demodb
           for i in $(seq 1 60); do
-            pgrep -f '^cub_server demodb$' >/dev/null && break
+            pgrep -u cubrid -f '^cub_server demodb$' >/dev/null && break
             sleep 1
           done
-          pgrep -f '^cub_server demodb$' >/dev/null \
+          pgrep -u cubrid -f '^cub_server demodb$' >/dev/null \
             || { echo "demodb did not start"; cubrid server status; exit 1; }
+          EOS
+          chmod 0755 /tmp/demodb-as-cubrid.sh
+          runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
+            WORKSPACE="$GITHUB_WORKSPACE" bash /tmp/demodb-as-cubrid.sh
 
       - name: Run the API test suite
         id: run
-        working-directory: cubrid/cubridmanager/server/test
         run: |
           set -uo pipefail
-          export CUBRID="$GITHUB_WORKSPACE/CUBRID"
+          cat > /tmp/test-as-cubrid.sh <<'EOS'
+          set -uo pipefail
+          export CUBRID="$WORKSPACE/CUBRID"
           export CUBRID_DATABASES="$CUBRID/databases"
           export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
-          ./run_tests.sh -fc "${{ steps.version.outputs.short }}" "$TEST_SET" \
-            2>&1 | tee run.log
-          status=${PIPESTATUS[0]}
+          cd "$WORKSPACE/cubrid/cubridmanager/server/test"
+          ./run_tests.sh -fc "$TEST_VERSION" "$TEST_SET" 2>&1 | tee run.log
+          exit ${PIPESTATUS[0]}
+          EOS
+          chmod 0755 /tmp/test-as-cubrid.sh
+          runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
+            WORKSPACE="$GITHUB_WORKSPACE" TEST_SET="$TEST_SET" \
+            TEST_VERSION="${{ steps.version.outputs.short }}" \
+            bash /tmp/test-as-cubrid.sh
+          status=$?
+          # $GITHUB_OUTPUT belongs to the runner, so it is written from here
+          # rather than from inside the unprivileged shell.
           echo "status=$status" >> "$GITHUB_OUTPUT"
           # The verdict is reported, not enforced: a failure here must not stop
           # the PR from being merged.
@@ -341,6 +313,7 @@ jobs:
             echo "| | |"
             echo "| --- | --- |"
             echo "| engine | \`${ENGINE_REPO}@${ENGINE_REF}\` (VERSION ${{ steps.version.outputs.full }}) |"
+            echo "| built on | Rocky Linux 8.10, gcc $(gcc -dumpversion) |"
             echo "| test set | \`$TEST_SET\` |"
             echo "| baselines | \`${{ steps.version.outputs.dir }}/\` |"
             echo
@@ -369,7 +342,7 @@ jobs:
             **CMS API test — ${{ steps.summary.outputs.verdict }}**
 
             engine `${{ env.ENGINE_REPO }}@${{ env.ENGINE_REF }}` (VERSION ${{ steps.version.outputs.full }}),
-            baselines `${{ steps.version.outputs.dir }}/`.
+            built on Rocky Linux 8.10, baselines `${{ steps.version.outputs.dir }}/`.
             See the job summary for the failing cases. This check does not block the merge.
 
       - name: Upload the reports
