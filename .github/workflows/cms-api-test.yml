@@ -150,14 +150,38 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
           echo "make jobs capped at $(nproc)"
 
+      # CMakeLists.txt:767-773 points JAVA_HOME at <build>/vm/jdk8 and then calls
+      # find_package(JNI). That directory is downloaded by the pl_install_jdk
+      # build target, so at configure time it does not exist yet and FindJNI
+      # falls back to whatever JDK is installed system wide. There is none here
+      # on purpose -- the build has to be JDK 8 - so point FindJNI straight at
+      # the JDK 8 that setup-java unpacked. The paths are searched rather than
+      # written out, so a different JDK layout does not break this.
       - name: Build CUBRID with this manager server
         working-directory: cubrid
         run: |
           set -euo pipefail
           export CCACHE_DIR=$HOME/.ccache
           export PATH="/usr/lib/ccache:$PATH"
+          jdk8=${JAVA_HOME_8_X64:-$JAVA_HOME}
           java -version 2>&1 | head -1
-          ./build.sh -m release -j "$JAVA_HOME" -p "$GITHUB_WORKSPACE/CUBRID" build
+          echo "JDK 8 for JNI: $jdk8"
+          libawt=$(find "$jdk8" -name libawt.so  -print -quit)
+          libjvm=$(find "$jdk8" -name libjvm.so  -print -quit)
+          jnih=$(find "$jdk8" -name jni.h        -print -quit)
+          jnimdh=$(find "$jdk8" -name jni_md.h   -print -quit)
+          for v in libawt libjvm jnih jnimdh; do
+            eval "val=\$$v"
+            [ -n "$val" ] || { echo "could not find $v under $jdk8"; exit 1; }
+            echo "  $v=$val"
+          done
+          ./build.sh -m release -j "$jdk8" -p "$GITHUB_WORKSPACE/CUBRID" \
+            -c "-DJAVA_AWT_LIBRARY=$libawt \
+                -DJAVA_JVM_LIBRARY=$libjvm \
+                -DJAVA_INCLUDE_PATH=$(dirname "$jnih") \
+                -DJAVA_INCLUDE_PATH2=$(dirname "$jnimdh") \
+                -DJAVA_AWT_INCLUDE_PATH=$(dirname "$jnih")" \
+            build
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
 
