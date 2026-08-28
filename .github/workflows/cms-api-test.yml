@@ -105,6 +105,7 @@ jobs:
             libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
             libstdc++-static \
+            glibc-gconv-extra glibc-langpack-ko glibc-langpack-en \
             java-1.8.0-openjdk-devel ant \
             python3 procps-ng diffutils
 
@@ -131,6 +132,17 @@ jobs:
           # procps-ng matters: the test runner finds and kills its helper
           # processes with pgrep/pkill, which a minimal image does not have.
           command -v pgrep >/dev/null || { echo "pgrep is missing"; exit 1; }
+          # The build converts its Korean message catalogs to EUC-KR, and the
+          # converter for it lives in glibc-gconv-extra, which a minimal image
+          # does not carry. Checked here so it fails with a clear reason rather
+          # than as "iconv: failed to start conversion processing" mid build.
+          echo test | iconv -f utf-8 -t euckr >/dev/null \
+            || { echo "iconv cannot convert to euckr"; exit 1; }
+          # The engine builds an unused-libstdc++ check into gencat with
+          # -static-libstdc++, which needs libstdc++.a rather than the shared
+          # library that gcc-c++ brings.
+          ls /usr/lib/gcc/x86_64-redhat-linux/*/libstdc++.a >/dev/null \
+            || { echo "libstdc++.a is missing"; exit 1; }
 
       - name: Install CMake ${{ env.CMAKE_VERSION }}
         run: |
