@@ -69,6 +69,8 @@ env:
   TEST_SET: task_result_check.txt
   # Rocky 8 ships CMake 3.20 and the engine asks for 3.21, so one is fetched.
   CMAKE_VERSION: 3.28.3
+  # Only used if the ninja-build package cannot be reached.
+  NINJA_VERSION: 1.11.1
 
 jobs:
   cms-api-test:
@@ -90,12 +92,40 @@ jobs:
         run: |
           set -euo pipefail
           dnf -y install epel-release
+          # Several build dependencies (systemtap-sdt-devel, ninja-build) live
+          # in CodeReady Builder, which Rocky calls powertools on 8 and which is
+          # off by default. EPEL says so itself when it is installed.
+          /usr/bin/crb enable 2>/dev/null \
+            || dnf -y config-manager --set-enabled powertools \
+            || dnf -y config-manager --set-enabled crb \
+            || echo "could not enable CRB; some packages may be missing"
+
           dnf -y install \
-            git gcc gcc-c++ make ninja-build bison flex \
-            libtool autoconf automake patch file which rsync tar gzip xz curl \
+            git gcc gcc-c++ make bison flex \
+            libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
             java-1.8.0-openjdk-devel ant \
             python3 procps-ng diffutils
+
+          # build.sh runs "ninja install" by name (build.sh:351), so a command
+          # called exactly "ninja" has to exist. The EL package installs it as
+          # /usr/bin/ninja-build, so it gets a link; if the package is not
+          # reachable at all, the upstream prebuilt binary is used instead.
+          dnf -y install ninja-build || true
+          if ! command -v ninja >/dev/null && command -v ninja-build >/dev/null; then
+            ln -s "$(command -v ninja-build)" /usr/local/bin/ninja
+          fi
+          if ! command -v ninja >/dev/null; then
+            echo "ninja-build package unavailable; fetching the prebuilt binary"
+            curl -fsSL -o /tmp/ninja.zip \
+              https://github.com/ninja-build/ninja/releases/download/v$NINJA_VERSION/ninja-linux.zip
+            unzip -o /tmp/ninja.zip -d /usr/local/bin
+            chmod 0755 /usr/local/bin/ninja
+          fi
+          command -v ninja >/dev/null \
+            || { echo "ninja is required and could not be installed"; exit 1; }
+          echo "ninja: $(command -v ninja) ($(ninja --version))"
+
           gcc --version | head -1
           # procps-ng matters: the test runner finds and kills its helper
           # processes with pgrep/pkill, which a minimal image does not have.
@@ -193,7 +223,8 @@ jobs:
           cat > /tmp/build-as-cubrid.sh <<'EOS'
           set -euo pipefail
           cd "$WORKSPACE/cubrid"
-          ./build.sh -m release -j "$JAVA_HOME" -p "$WORKSPACE/CUBRID" build
+          ./build.sh -m release -g ninja -j "$JAVA_HOME" \
+            -p "$WORKSPACE/CUBRID" build
           EOS
           chmod 0755 /tmp/build-as-cubrid.sh
 
