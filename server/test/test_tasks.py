@@ -878,6 +878,30 @@ def reset_mon_data(cubrid_home):
             pass
 
 
+def run_service_cmd(args, what, timeout=300):
+    """Run one cubrid service command, bounded and not silenced.
+
+    These used to be subprocess.call with the output thrown away, which meant a
+    command that never returned looked exactly like a suite that had stopped
+    printing: the run just sat there until the CI job was cancelled, with no
+    clue which command it was in. Now each one has a deadline and its output is
+    shown, so a service that will not come down says so.
+    """
+    print("  %s ..." % what)
+    try:
+        done = subprocess.run(args, timeout=timeout,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except subprocess.TimeoutExpired:
+        print("    \033[31m'%s' did not return within %d s\033[0m"
+              % (" ".join(args), timeout))
+        return None
+    output = done.stdout.decode(errors="replace").strip()
+    for line in output.split("\n")[-15:]:
+        if line:
+            print("    " + line)
+    return done.returncode
+
+
 def restart_services():
     """Start the run from a known state.
 
@@ -889,15 +913,13 @@ def restart_services():
     cubrid_home = os.environ["CUBRID"]
     cubrid_bin = os.path.join(cubrid_home, "bin", "cubrid")
     print("restarting the CUBRID service to start from a known state ...")
-    subprocess.call([cubrid_bin, "service", "stop"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_service_cmd([cubrid_bin, "service", "stop"], "service stop")
     reset_mon_data(cubrid_home)
-    subprocess.call([cubrid_bin, "service", "start"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_service_cmd([cubrid_bin, "service", "start"], "service start")
     # demodb is what most of the cases run against; "service start" only starts
     # it when cubrid.conf lists it, so ask for it explicitly.
-    subprocess.call([cubrid_bin, "server", "start", "demodb"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_service_cmd([cubrid_bin, "server", "start", "demodb"],
+                    "server start demodb")
     # And check that it really came up. Everything after this assumes it did:
     # the monitoring gather only registers volumes while the database is up, so
     # a silent failure here turns into a two minute wait and five failed cases
@@ -921,8 +943,7 @@ def stop_services():
     """
     cubrid_bin = os.path.join(os.environ["CUBRID"], "bin", "cubrid")
     print("stopping the CUBRID service ...")
-    subprocess.call([cubrid_bin, "service", "stop"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run_service_cmd([cubrid_bin, "service", "stop"], "service stop")
 
 
 def init_env():
