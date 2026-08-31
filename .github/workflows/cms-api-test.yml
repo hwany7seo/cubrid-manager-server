@@ -322,6 +322,10 @@ jobs:
 
       - name: Run the API test suite
         id: run
+        # Bounded on its own so that a suite which stops making progress ends
+        # with its log intact, instead of running until the job is cancelled
+        # and leaving nothing behind.
+        timeout-minutes: 60
         run: |
           set -uo pipefail
           cat > /tmp/test-as-cubrid.sh <<'EOS'
@@ -330,8 +334,16 @@ jobs:
           export CUBRID_DATABASES="$CUBRID/databases"
           export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
+          # Python block buffers when its stdout is a pipe, and the pipe into
+          # tee is exactly that, so without this the progress of a two hour run
+          # is invisible until it ends.
+          export PYTHONUNBUFFERED=1
           cd "$WORKSPACE/cubrid/cubridmanager/server/test"
-          ./run_tests.sh -fc "$TEST_VERSION" "$TEST_SET" 2>&1 | tee run.log
+          # No terminal is attached, so nothing may wait for input; the runner
+          # checks for that itself and says so rather than blocking.
+          timeout --signal=INT --kill-after=1m 50m \
+            ./run_tests.sh -fc "$TEST_VERSION" "$TEST_SET" </dev/null 2>&1 \
+            | tee run.log
           exit ${PIPESTATUS[0]}
           EOS
           chmod 0755 /tmp/test-as-cubrid.sh
@@ -340,6 +352,10 @@ jobs:
             TEST_VERSION="${{ steps.version.outputs.short }}" \
             bash /tmp/test-as-cubrid.sh
           status=$?
+          if [ $status -eq 124 ] || [ $status -eq 137 ]; then
+            echo "the suite did not finish within 50 minutes; the last case in"
+            echo "run.log above is where it stopped making progress"
+          fi
           # $GITHUB_OUTPUT belongs to the runner, so it is written from here
           # rather than from inside the unprivileged shell.
           echo "status=$status" >> "$GITHUB_OUTPUT"

@@ -929,6 +929,15 @@ def init_env():
     response = do_one_job("login", case_path("login"), "", record_files=False)
     if response["status"] == "failure":
         request = load_task(case_path("login"))
+        if not sys.stdin.isatty():
+            # Asking for a password with nothing attached to stdin would wait
+            # for an answer that cannot come; in CI that shows up as a job that
+            # hangs until it is cancelled rather than as a failed login.
+            print("login as %s failed (%s), and there is no terminal to ask "
+                  "for a password on. Fix the credentials in %s."
+                  % (request.get("id"), response.get("note", ""),
+                     case_path("login")))
+            sys.exit(1)
         request["password"] = getpass(
             "Please input the passwd for %s: " % (request["id"]))
         response = send_one("login", request, "")
