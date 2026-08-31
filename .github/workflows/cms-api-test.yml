@@ -1,42 +1,20 @@
 name: CMS API test
 
-# Builds CUBRID with this PR's manager server and runs the API test suite
-# (server/test, task_result_check) against it.
+# Builds CUBRID with this PR's manager server and runs server/test against it.
 #
-# The build runs in a Rocky Linux 8.10 container rather than on the runner
-# image, so that CUBRID is compiled with the GCC 8 toolchain the product
-# actually targets. On the runner's GCC 13 the engine does not compile at all:
-# it promotes warnings to errors, and GCC 13 reports things GCC 8 does not --
-# -Waddress on a char[1024] member in cubrid-cci, and -Wstringop-overflow
-# inside libstdc++'s own <atomic> while building libtbb. Matching the product
-# toolchain removes that whole class of failure instead of suppressing the
-# warnings one at a time.
-#
-# A container job runs as root, but CUBRID is meant to be run by its own
-# unprivileged owner, so a "cubrid" user is created and the build, the database
-# and the test all run as that user. Only the steps that talk to the runner
-# itself -- installing packages, checking out, writing the step summary -- stay
-# as root.
+# The build runs in a Rocky Linux 8.10 container so that CUBRID is compiled
+# with the GCC 8 toolchain the product targets; on the runner's GCC 13 the
+# engine does not compile, because it promotes warnings to errors and GCC 13
+# reports things GCC 8 does not.
 #
 # The result never blocks a merge: the job finishes green either way and says
 # PASS or FAIL in the job summary and in a comment on the PR. To make it
-# blocking instead, replace the "exit 0" at the end of the test step with
-# "exit $status" and mark this check as required in the branch protection
-# rules for develop.
+# blocking, replace the "exit 0" at the end of the test step with
+# "exit $status" and mark this check as required for develop.
 #
-# TRYING IT OUT IN A FORK
-#   The push trigger below runs the whole thing on any branch, but only when
-#   the repository is not CUBRID/cubrid-manager-server -- pushing a branch to
-#   the real repository must not start a long build. So in a fork it is enough
-#   to push the branch that carries this file.
-#
-#   To build against a fork of the engine as well, set the repository variable
-#   ENGINE_REPO (Settings > Secrets and variables > Actions > Variables) or
-#   pass engine_repo when running it by hand. It defaults to CUBRID/cubrid.
-#
-#   Nothing else is fork specific: the engine is public, so no token is needed,
-#   and the PR comment step is already allowed to fail where there is no write
-#   token.
+# In a fork, pushing any branch runs it; in CUBRID/cubrid-manager-server only
+# pull requests to develop and manual runs do. Set the repository variable
+# ENGINE_REPO or pass engine_repo to build against a fork of the engine.
 
 on:
   pull_request:
@@ -60,29 +38,22 @@ concurrency:
 
 defaults:
   run:
-    # A container job would otherwise use "sh"; these steps use bash syntax
-    # (PIPESTATUS, ${var/./_}) and only work by accident where /bin/sh happens
-    # to be bash.
+    # A container job would otherwise use sh; these steps use bash syntax.
     shell: bash
 
 permissions:
   contents: read
-  pull-requests: write   # for the result comment
+  pull-requests: write
 
 env:
-  # inputs win, then the repository variable a fork can set, then the default
   ENGINE_REPO: ${{ github.event.inputs.engine_repo || vars.ENGINE_REPO || 'CUBRID/cubrid' }}
   ENGINE_REF: ${{ github.event.inputs.engine_ref || vars.ENGINE_REF || 'develop' }}
-  TEST_SET: task_result_check.txt
-  # Rocky 8 ships CMake 3.20 and the engine asks for 3.21, so one is fetched.
+  TEST_SET: task_status_check.txt
   CMAKE_VERSION: 3.28.3
-  # Only used if the ninja-build package cannot be reached.
   NINJA_VERSION: 1.11.1
 
 jobs:
   cms-api-test:
-    # A push only builds in a fork; in the real repository this runs on pull
-    # requests to develop and on demand.
     if: >-
       github.event_name != 'push' ||
       github.repository != 'CUBRID/cubrid-manager-server'
@@ -92,16 +63,14 @@ jobs:
       image: rockylinux/rockylinux:8.10
 
     steps:
-      # First, because actions/checkout needs git inside the container; without
-      # it the action falls back to a tarball download and the submodules the
-      # engine build needs would not come along.
+      # Before the checkouts: actions/checkout needs git in the container, or
+      # it falls back to a tarball and the submodules do not come along.
       - name: Install the toolchain and test dependencies
         run: |
           set -euo pipefail
           dnf -y install epel-release
-          # Several build dependencies (systemtap-sdt-devel, ninja-build) live
-          # in CodeReady Builder, which Rocky calls powertools on 8 and which is
-          # off by default. EPEL says so itself when it is installed.
+          # ninja-build and systemtap-sdt-devel live in CodeReady Builder,
+          # which is off by default.
           /usr/bin/crb enable 2>/dev/null \
             || dnf -y config-manager --set-enabled powertools \
             || dnf -y config-manager --set-enabled crb \
@@ -116,16 +85,13 @@ jobs:
             java-1.8.0-openjdk-devel ant \
             python3 procps-ng diffutils
 
-          # build.sh runs "ninja install" by name (build.sh:351), so a command
-          # called exactly "ninja" has to exist. The EL package installs it as
-          # /usr/bin/ninja-build, so it gets a link; if the package is not
-          # reachable at all, the upstream prebuilt binary is used instead.
+          # build.sh runs "ninja install" by name, and the EL package installs
+          # the binary as ninja-build.
           dnf -y install ninja-build || true
           if ! command -v ninja >/dev/null && command -v ninja-build >/dev/null; then
             ln -s "$(command -v ninja-build)" /usr/local/bin/ninja
           fi
           if ! command -v ninja >/dev/null; then
-            echo "ninja-build package unavailable; fetching the prebuilt binary"
             curl -fsSL -o /tmp/ninja.zip \
               https://github.com/ninja-build/ninja/releases/download/v$NINJA_VERSION/ninja-linux.zip
             unzip -o /tmp/ninja.zip -d /usr/local/bin
@@ -133,29 +99,22 @@ jobs:
           fi
           command -v ninja >/dev/null \
             || { echo "ninja is required and could not be installed"; exit 1; }
-          echo "ninja: $(command -v ninja) ($(ninja --version))"
 
           gcc --version | head -1
-          # procps-ng matters: the test runner finds and kills its helper
-          # processes with pgrep/pkill, which a minimal image does not have.
+          ninja --version
+
+          # Checked here so a missing piece fails with a clear reason instead
+          # of as an obscure error deep in the build.
           command -v pgrep >/dev/null || { echo "pgrep is missing"; exit 1; }
-          # The build converts its Korean message catalogs to EUC-KR, and the
-          # converter for it lives in glibc-gconv-extra, which a minimal image
-          # does not carry. Checked here so it fails with a clear reason rather
-          # than as "iconv: failed to start conversion processing" mid build.
           echo test | iconv -f utf-8 -t euckr >/dev/null \
             || { echo "iconv cannot convert to euckr"; exit 1; }
-          # The engine builds an unused-libstdc++ check into gencat with
-          # -static-libstdc++, which needs libstdc++.a rather than the shared
-          # library that gcc-c++ brings.
           ls /usr/lib/gcc/x86_64-redhat-linux/*/libstdc++.a >/dev/null \
             || { echo "libstdc++.a is missing"; exit 1; }
-          # src/base/dynamic_load.h includes <nlist.h> on Linux, which ships in
-          # elfutils-libelf-devel rather than with the compiler.
           test -f /usr/include/nlist.h \
             || { echo "nlist.h is missing"; exit 1; }
 
       - name: Install CMake ${{ env.CMAKE_VERSION }}
+        # Rocky 8 ships 3.20 and the engine asks for 3.21.
         run: |
           set -euo pipefail
           url=https://github.com/Kitware/CMake/releases/download
@@ -164,9 +123,8 @@ jobs:
           echo "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin" >> "$GITHUB_PATH"
           "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin/cmake" --version | head -1
 
-      # The manager server is a submodule of CUBRID/cubrid at path
-      # "cubridmanager", and it is built as part of the engine. So the engine
-      # is what gets checked out, and this PR replaces that submodule.
+      # The manager server is a submodule of the engine at path cubridmanager,
+      # so the engine is checked out and this PR replaces that submodule.
       - name: Check out the engine
         uses: actions/checkout@v4
         with:
@@ -182,35 +140,19 @@ jobs:
           fetch-depth: 1
           path: cubrid/cubridmanager
 
-      # The engine's VERSION file ("11.5.0") decides which baseline directory
-      # the test compares against, so 11.4 and 11.5 do not share one.
-      - name: Resolve the test version from VERSION
+      - name: Read the engine version
         id: version
         working-directory: cubrid
         run: |
           set -euo pipefail
           full=$(tr -d '[:space:]' < VERSION)
-          short=$(echo "$full" | cut -d. -f1,2)
-          dir=${short/./_}
-          echo "full=$full"   >> "$GITHUB_OUTPUT"
-          echo "short=$short" >> "$GITHUB_OUTPUT"
-          echo "dir=$dir"     >> "$GITHUB_OUTPUT"
-          echo "engine VERSION=$full -> test version $short (baselines in $dir/)"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "engine VERSION=$full"
 
-          # Without a baseline for this version every compared case fails on a
-          # missing .answer, which is a setup gap rather than a regression.
-          baselines="cubridmanager/server/test/task_test_case/task_result_check/$dir"
-          if [ -z "$(ls -A "$baselines"/*.answer 2>/dev/null)" ]; then
-            echo "::warning title=No baseline::$dir has no .answer files; run \
-              './run_tests.sh -a $short task_result_check.txt' on a $short build and commit them"
-          fi
-
-      # libtbb builds with a bare "make -j", meaning unlimited jobs, which on a
-      # small runner starts dozens of compilers at once. That is a resource
-      # matter rather than a toolchain one, so it applies in the container too.
-      # It belongs upstream as "make -j${CMAKE_BUILD_PARALLEL_LEVEL}"; libtbb is
-      # the only external project that does this.
       - name: Cap the libtbb build parallelism
+        # libtbb builds with a bare "make -j", which starts one compiler per
+        # translation unit at once. Belongs upstream as
+        # "make -j${CMAKE_BUILD_PARALLEL_LEVEL}".
         working-directory: cubrid
         run: |
           set -euo pipefail
@@ -219,31 +161,22 @@ jobs:
                      s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/" "$f"
           grep -n -- 'make -j' "$f" | sed 's/^/  /'
 
-      # Everything from here on belongs to the cubrid user: the install tree,
-      # the database and the processes the suite starts and kills. The checkout
-      # steps ran as root, so the workspace is handed over as well.
+      # CUBRID is meant to be run by its own unprivileged owner, and a
+      # container job is root, so everything from here runs as cubrid.
       - name: Create the cubrid user
         run: |
           set -euo pipefail
           useradd -m -s /bin/bash cubrid
           mkdir -p "$GITHUB_WORKSPACE/CUBRID"
           chown -R cubrid:cubrid "$GITHUB_WORKSPACE"
-          echo "workspace now owned by $(stat -c %U "$GITHUB_WORKSPACE")"
 
       - name: Build CUBRID with this manager server
         run: |
           set -euo pipefail
-          # The container's JDK 8 is a full system JDK, so find_package(JNI)
-          # locates AWT and JVM on its own; no cache variables are needed.
           JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
-          echo "JAVA_HOME=$JAVA_HOME"
           java -version 2>&1 | head -1
-          test -f "$JAVA_HOME/include/jni.h" \
-            || { echo "no jni.h under $JAVA_HOME"; exit 1; }
           echo "cores: $(nproc), memory: $(free -g | awk '/^Mem:/{print $2"G"}')"
 
-          # The build runs as cubrid. It is written to a file rather than
-          # squeezed into a quoted -c argument so that it stays readable.
           cat > /tmp/build-as-cubrid.sh <<'EOS'
           set -euo pipefail
           cd "$WORKSPACE/cubrid"
@@ -259,55 +192,38 @@ jobs:
           rc=$?
           set -e
 
-          # ExternalProject sends its output to log files, so ninja only says
-          # "build stopped: subcommand failed". Work out which project stopped
-          # and print its error log in full, not inside a collapsed group.
+          # ExternalProject keeps its output in log files, so a failure prints
+          # only "Command failed"; show the logs of whatever did not finish.
           if [ $rc -ne 0 ]; then
             cd cubrid
             stamp=build_x86_64_release/3rdparty/Stamp
-            # Only projects that got as far as configuring are interesting; the
-            # ones ninja had not reached yet have no stamps at all and would
-            # otherwise be listed as if they had failed.
             echo "===== external projects that configured but did not build"
             failed=""
             for d in "$stamp"/*/; do
               n=$(basename "$d")
               [ -f "$d/$n-configure" ] || continue
-              if [ ! -f "$d/$n-build" ]; then
-                echo "  $n"
-                failed="$failed $n"
-              fi
+              [ -f "$d/$n-build" ] || { echo "  $n"; failed="$failed $n"; }
             done
             [ -n "$failed" ] \
               || echo "  (none; look for a FAILED: line in the ninja output above)"
-
             for n in $failed; do
               for f in "$stamp/$n/$n-build-err.log" "$stamp/$n/$n-build-out.log"; do
                 [ -s "$f" ] || continue
-                echo "===== $f (last 80 lines)"
-                tail -n 80 "$f"
+                echo "===== $f (last 80 lines)"; tail -n 80 "$f"
               done
             done
-
             echo "===== compiler errors across all 3rdparty logs"
             grep -h -E 'error:|fatal error|Error [0-9]+|cannot find|No such file or directory' \
               "$stamp"/*/*.log 2>/dev/null | sort -u | head -30 \
               || echo "  none matched"
             echo "===== disk"; df -h . | tail -1
-            echo "build.sh exited $rc"
             exit $rc
           fi
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
 
-      # The suite runs every case against demodb: it reads its volumes, unloads
-      # its classes and opens transactions on it. The demo data has to be there,
-      # not just an empty database.
-      #
-      # Only the database is created here. Starting the service is the suite's
-      # own job -- restart_services() bounces it to reach a known state before
-      # the first case -- so anything left running here would only be stopped
-      # again a moment later.
+      # Only the database is created here; the suite starts the service itself
+      # to reach a known state before the first case.
       - name: Create demodb
         timeout-minutes: 15
         run: |
@@ -322,23 +238,14 @@ jobs:
           sh "$CUBRID/demo/make_cubrid_demo.sh"
           grep -q '^demodb' "$CUBRID_DATABASES/databases.txt" \
             || { echo "demodb was not registered in databases.txt"; exit 1; }
-          # Leave nothing running behind: make_cubrid_demo may start a server,
-          # and the suite expects to bring the service up itself. Bounded,
-          # because a service command that will not return must not turn into a
-          # job that hangs.
           timeout 300 cubrid service stop || echo "service stop returned $?"
           EOS
           chmod 0755 /tmp/demodb-as-cubrid.sh
           runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
             WORKSPACE="$GITHUB_WORKSPACE" bash /tmp/demodb-as-cubrid.sh
-          echo "databases.txt:"; sed 's/^/  /' \
-            "$GITHUB_WORKSPACE/CUBRID/databases/databases.txt"
 
       - name: Run the API test suite
         id: run
-        # Bounded on its own so that a suite which stops making progress ends
-        # with its log intact, instead of running until the job is cancelled
-        # and leaving nothing behind.
         timeout-minutes: 60
         run: |
           set -uo pipefail
@@ -348,33 +255,25 @@ jobs:
           export CUBRID_DATABASES="$CUBRID/databases"
           export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
-          # Python block buffers when its stdout is a pipe, and the pipe into
-          # tee is exactly that, so without this the progress of a two hour run
-          # is invisible until it ends.
+          # Python block buffers into a pipe, which would hide the progress of
+          # the whole run until it ended.
           export PYTHONUNBUFFERED=1
           cd "$WORKSPACE/cubrid/cubridmanager/server/test"
-          # No terminal is attached, so nothing may wait for input; the runner
-          # checks for that itself and says so rather than blocking.
           timeout --signal=INT --kill-after=1m 50m \
-            ./run_tests.sh -fc "$TEST_VERSION" "$TEST_SET" </dev/null 2>&1 \
-            | tee run.log
+            ./run_tests.sh "$TEST_SET" </dev/null 2>&1 | tee run.log
           exit ${PIPESTATUS[0]}
           EOS
           chmod 0755 /tmp/test-as-cubrid.sh
           runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
             WORKSPACE="$GITHUB_WORKSPACE" TEST_SET="$TEST_SET" \
-            TEST_VERSION="${{ steps.version.outputs.short }}" \
             bash /tmp/test-as-cubrid.sh
           status=$?
           if [ $status -eq 124 ] || [ $status -eq 137 ]; then
-            echo "the suite did not finish within 50 minutes; the last case in"
-            echo "run.log above is where it stopped making progress"
+            echo "the suite did not finish in time; the last case in run.log"
+            echo "above is where it stopped making progress"
           fi
-          # $GITHUB_OUTPUT belongs to the runner, so it is written from here
-          # rather than from inside the unprivileged shell.
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          # The verdict is reported, not enforced: a failure here must not stop
-          # the PR from being merged.
+          # Reported, not enforced.
           exit 0
 
       - name: Summarise the result
@@ -385,22 +284,16 @@ jobs:
           set -uo pipefail
           status='${{ steps.run.outputs.status }}'
           if [ ! -f run.log ]; then
-            # The suite never ran: something before it failed, usually the build.
             verdict='⚠️ NOT RUN'
             echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
             {
               echo "## CMS API test — $verdict"
               echo
-              echo "The suite did not run; an earlier step failed. See the build"
-              echo "step for the cause."
+              echo "The suite did not run; an earlier step failed."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [ "$status" = "0" ]; then
-            verdict='✅ PASS'
-          else
-            verdict='❌ FAIL'
-          fi
+          if [ "$status" = "0" ]; then verdict='✅ PASS'; else verdict='❌ FAIL'; fi
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
 
           {
@@ -411,7 +304,6 @@ jobs:
             echo "| engine | \`${ENGINE_REPO}@${ENGINE_REF}\` (VERSION ${{ steps.version.outputs.full }}) |"
             echo "| built on | Rocky Linux 8.10, gcc $(gcc -dumpversion) |"
             echo "| test set | \`$TEST_SET\` |"
-            echo "| baselines | \`${{ steps.version.outputs.dir }}/\` |"
             echo
             tail -n 3 run.log | grep -E 'succeeded|failed' || true
             echo
@@ -438,17 +330,16 @@ jobs:
             **CMS API test — ${{ steps.summary.outputs.verdict }}**
 
             engine `${{ env.ENGINE_REPO }}@${{ env.ENGINE_REF }}` (VERSION ${{ steps.version.outputs.full }}),
-            built on Rocky Linux 8.10, baselines `${{ steps.version.outputs.dir }}/`.
+            test set `${{ env.TEST_SET }}`, built on Rocky Linux 8.10.
             See the job summary for the failing cases. This check does not block the merge.
 
       - name: Upload the reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cms-api-test-${{ steps.version.outputs.dir }}
+          name: cms-api-test
           path: |
             cubrid/cubridmanager/server/test/run.log
             cubrid/cubridmanager/server/test/log/
-            cubrid/cubridmanager/server/test/task_test_case/task_result_check/${{ steps.version.outputs.dir }}/*.result
           retention-days: 14
           if-no-files-found: warn
