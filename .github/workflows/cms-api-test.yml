@@ -303,7 +303,13 @@ jobs:
       # The suite runs every case against demodb: it reads its volumes, unloads
       # its classes and opens transactions on it. The demo data has to be there,
       # not just an empty database.
-      - name: Create demodb and start the service
+      #
+      # Only the database is created here. Starting the service is the suite's
+      # own job -- restart_services() bounces it to reach a known state before
+      # the first case -- so anything left running here would only be stopped
+      # again a moment later.
+      - name: Create demodb
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           cat > /tmp/demodb-as-cubrid.sh <<'EOS'
@@ -314,18 +320,19 @@ jobs:
           export PATH="$CUBRID/bin:$PATH"
           mkdir -p "$CUBRID_DATABASES"
           sh "$CUBRID/demo/make_cubrid_demo.sh"
-          cubrid service start
-          cubrid server start demodb
-          for i in $(seq 1 60); do
-            pgrep -u cubrid -f '^cub_server demodb$' >/dev/null && break
-            sleep 1
-          done
-          pgrep -u cubrid -f '^cub_server demodb$' >/dev/null \
-            || { echo "demodb did not start"; cubrid server status; exit 1; }
+          grep -q '^demodb' "$CUBRID_DATABASES/databases.txt" \
+            || { echo "demodb was not registered in databases.txt"; exit 1; }
+          # Leave nothing running behind: make_cubrid_demo may start a server,
+          # and the suite expects to bring the service up itself. Bounded,
+          # because a service command that will not return must not turn into a
+          # job that hangs.
+          timeout 300 cubrid service stop || echo "service stop returned $?"
           EOS
           chmod 0755 /tmp/demodb-as-cubrid.sh
           runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
             WORKSPACE="$GITHUB_WORKSPACE" bash /tmp/demodb-as-cubrid.sh
+          echo "databases.txt:"; sed 's/^/  /' \
+            "$GITHUB_WORKSPACE/CUBRID/databases/databases.txt"
 
       - name: Run the API test suite
         id: run

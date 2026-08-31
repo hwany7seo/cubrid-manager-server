@@ -10,6 +10,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 from getpass import getpass
 
@@ -883,23 +884,43 @@ def run_service_cmd(args, what, timeout=300):
 
     These used to be subprocess.call with the output thrown away, which meant a
     command that never returned looked exactly like a suite that had stopped
-    printing: the run just sat there until the CI job was cancelled, with no
-    clue which command it was in. Now each one has a deadline and its output is
-    shown, so a service that will not come down says so.
+    printing.
+
+    The output goes to a file rather than a pipe on purpose. "cubrid service"
+    forks children that inherit its stdout, so a pipe stays open after the
+    command itself is killed and reading it would block for as long as any
+    grandchild lives -- the timeout would expire and the run would still hang,
+    which is what a pipe version of this did. For the same reason the command
+    gets its own process group, so the whole tree can be killed at once.
     """
     print("  %s ..." % what)
+    outfile = tempfile.NamedTemporaryFile(prefix="cubrid_service_",
+                                          suffix=".log", delete=False)
+    returncode = None
     try:
-        done = subprocess.run(args, timeout=timeout,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    except subprocess.TimeoutExpired:
-        print("    \033[31m'%s' did not return within %d s\033[0m"
-              % (" ".join(args), timeout))
-        return None
-    output = done.stdout.decode(errors="replace").strip()
-    for line in output.split("\n")[-15:]:
+        proc = subprocess.Popen(args, stdout=outfile, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+        try:
+            returncode = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print("    \033[31m'%s' did not return within %d s; killing it\033[0m"
+                  % (" ".join(args), timeout))
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except OSError:
+                pass
+            proc.wait(timeout=30)
+    finally:
+        outfile.close()
+    with open(outfile.name, errors="replace") as f:
+        output = f.read().strip()
+    os.remove(outfile.name)
+    for line in output.split("\n")[-20:]:
         if line:
             print("    " + line)
-    return done.returncode
+    if not output:
+        print("    (no output)")
+    return returncode
 
 
 def restart_services():
