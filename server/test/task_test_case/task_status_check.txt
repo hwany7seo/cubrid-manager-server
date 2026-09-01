@@ -177,7 +177,6 @@ broker_start_nullbroker,failure
 broker_restart
 broker_restart_errbroker,failure
 broker_restart_nullbroker,failure
-//broker_setparam,
 deletebroker
 executecasrunner
 executecasrunner_optional
@@ -231,35 +230,19 @@ deletedb_for_copydb
 gethoststat
 getdbprocstat
 getdbprocstat_all
-// changemode needs an HA configured server; on a standalone one it answers
-// "The server was not configured for HA.". Enable it on an HA setup.
-//changemode
 getstandbyserverstat
-// rolechange runs "cubrid heartbeat deact" and "... act" (cm_job_task.cpp
-// 10450/10515). CUBRID 11 dropped both subcommands -- heartbeat now takes
-// start/stop -- so the task fails with "'deact' command is invalid" on any
-// host, HA or not. This is a server side issue, not a test one; re-enable the
-// case once the task is ported to the current heartbeat commands.
-//rolechange
 getdbmode
-//heartbeatlist
-// ha_status / gethaapplyinfo need an HA-configured instance. On a standalone
-// server ha_status returns "The server was not configured for HA." and
-// gethaapplyinfo has no ha_copy log path to read. Enable them on an HA setup.
-//ha_status
-//gethaapplyinfo
 
 // tasks set conf files
 setsysparam_cmconf
-// setsysparam_errconf: the server now accepts an arbitrary confname as a file
-// under $CUBRID/conf, so it no longer fails. Disabled until reviewed.
-//setsysparam_errconf,failure
 setsysparam_nullconf,failure
-//setsysparam_cubridconf
-//broker_setparam
+setsysparam_cubridconf
 getdiagdata
 getdiagdata_optional
 killprocess
+
+//broker_setparam skip
+//broker_setparam
 
 getenvvarbyname
 copyfolder

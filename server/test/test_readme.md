@@ -8,6 +8,8 @@ HTTPS 인터페이스(`cm_port`, `/cm_api`)를 그대로 사용한다.
 
 ## 1. 사전 조건
 
+- `test_tasks.conf`에 접속 대상이 적혀 있을 것. **이 파일이 없으면 테스트는
+  시작되지 않고 경고를 출력한 뒤 종료한다.**
 - CUBRID가 설치되어 있고 `CUBRID` / `CUBRID_DATABASES` 환경변수가 설정되어 있을 것
 - CMS(`cub_manager`)가 실행 중일 것 (`cubrid manager start`)
 - `python3` (표준 라이브러리만 사용, 추가 패키지 불필요)
@@ -15,6 +17,15 @@ HTTPS 인터페이스(`cm_port`, `/cm_api`)를 그대로 사용한다.
 
 CMS는 `cm_port`에서 **HTTPS(자체 서명 인증서)** 로 서비스한다. 스크립트는 인증서를
 검증하지 않도록 되어 있다(`ssl._create_unverified_context()`).
+
+접속 대상은 `test_tasks.conf`가 정한다. 테스트 대상 CMS가 이 호스트에 있으리라는
+보장이 없으므로, 주소는 로컬 설치본에서 알아내는 것이 아니라 설정으로 둔다.
+`key value` / `key=value` 두 표기를 모두 인식하고 `#`부터는 주석이다.
+
+```
+cmsip 192.168.2.80    # CMS가 떠 있는 호스트
+port  8001            # 그 호스트 $CUBRID/conf/cm.conf의 cm_port
+```
 
 ---
 
@@ -108,8 +119,11 @@ server/test/
 
 ### 4.1 실행 흐름
 
-1. **포트 탐색** — `findport()`가 `$CUBRID/conf/cm.conf`의 `cm_port`를 읽는다.
-   (`cm_port 8001` / `cm_port=8001` 두 표기 모두 인식. 없으면 8001로 폴백)
+1. **접속 정보 로드** — `load_config()`가 `test_tasks.conf`에서 `cmsip`과 `port`를
+   읽는다. 파일이 없거나, 두 키 중 하나가 빠졌거나, `port`가 숫자가 아니거나,
+   해석할 수 없는 줄이 있으면 **요청을 보내기 전에** 경고를 출력하고 종료한다.
+   기본 호스트로 폴백하지 않는 것은, 그럴 경우 아무것도 검증하지 못하거나 더
+   나쁘게는 남의 서버를 상대로 테스트를 돌리게 되기 때문이다.
 2. **이전 실행 잔재 정리** — `reset_leftovers()` (전체 실행에서만)
    - `sweep_stale_helpers()`로 남아 있는 보조 프로세스 회수
    - `reset_test_dbs()`로 테스트가 만든 DB 디렉터리 · `databases.txt` 항목 ·

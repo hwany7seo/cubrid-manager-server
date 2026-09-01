@@ -14,33 +14,32 @@ import tempfile
 import time
 from getpass import getpass
 
-DEFAULT_PORT = 8001
-# A test set is a list file plus the directory of cases it names:
-#   task_test_case/<set>.txt          the scenario, one case per line
-#   task_test_case/<set>/<case>       the request JSON of that case
-# The reports are named after the set as well, so two sets never overwrite each
-# other's output.
+CONFIG_FILE = "test_tasks.conf"
+
 TEST_CASE_ROOT = "task_test_case/"
 DEFAULT_TEST_SET = "task_status_check.txt"
 TEST_CONFIG_DIR = "task_test_config/"
 
-# Baselines are per CUBRID version: the same request answers differently across
-# engines, so one .answer cannot cover them all. They live in a directory named
-# after the version, next to the cases:
-#   task_test_case/<set>/<version>/<case>.answer
-#   task_test_case/<set>/<version>/<case>.result
-KNOWN_VERSIONS = ("10_2", "11_0", "11_2", "11_4", "11_5")
+KNOWN_VERSIONS = ("10_2", "11_0", "11_2", "11_3", "11_4", "11_5")
 DEFAULT_VERSION = "11_4"
 # Where start_kill_targets() records the processes it spawned, so that a run
 # killed before clean_env() can be cleaned up by the next one.
 HELPER_PID_FILE = "log/helper_pids"
 
 # Every database the task list creates. They are removed before and after a run
-# so that a half finished run does not break the next one. "demodb" is not in
-# here on purpose, the tests only read it.
 TEST_DBS = ("alatestdb", "compactdbtest", "destinationdb", "anotherdb",
             "copydb", "destinationdb1", "renameadvdb", "renamedadvdb",
             "optionaldb")
+
+# Sets that drive an instance this host does not own. Everything the suite does
+# around the task list -- reset_leftovers(), the "cubrid service" bounce in
+# restart_services(), the files build_env() drops under $CUBRID, and the
+# clean_env()/stop_services() pair that undoes them -- acts on the machine the
+# suite runs on, never on the one the requests go to. For the HA set that work
+# is at best useless and at worst destructive: run on the HA node itself, the
+# "cubrid service stop" would tear down the very heartbeat the set exercises.
+# These sets therefore take the server as they find it and leave it that way.
+NO_LOCAL_ENV_SETS = ("task_ha_result_check",)
 
 
 def resolve_test_set(listarg):
@@ -183,35 +182,56 @@ def mask_paths(value):
     return value
 
 
-def findport():
-    """Read cm_port from the manager server configuration.
+def load_config():
+    """Read the address of the instance under test from CONFIG_FILE.
 
-    The port used to be taken from cm_httpd.conf, which does not exist any
-    more; cm.conf is the current configuration file.
+    The port used to be read from the local $CUBRID/conf/cm.conf, which only
+    describes the manager server installed on this host. The suite drives one
+    that is not necessarily here, so where to send the requests is
+    configuration rather than something to discover locally.
+
+    The file is required. A default host would either test nothing or, worse,
+    test whichever server happens to answer at that address, so a missing or
+    unreadable file stops the run before the first request goes out.
+
+    "cmsip 192.168.2.80" and "cmsip=192.168.2.80" are both read, "#" starts a
+    comment.
     """
-    cubrid = os.environ.get("CUBRID")
-    if not cubrid:
-        print("CUBRID environment variable is not set.")
+    conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILE)
+    if not os.path.isfile(conf):
+        print("\033[31mno %s: the tests cannot start.\033[0m" % conf)
+        print("Create it with the manager server to run against, for example")
+        print("")
+        print("    cmsip 192.168.2.80")
+        print("    port 8001")
         sys.exit(1)
 
-    # cm.conf writes an entry either as "cm_port 8001" or as "cm_port=8001".
-    conf = os.path.join(cubrid, "conf", "cm.conf")
-    try:
-        with open(conf, "r") as cf:
-            for line in cf:
-                line = line.split("#", 1)[0].strip()
-                match = re.match(r"cm_port\s*=?\s*(\d+)$", line)
-                if match:
-                    return int(match.group(1))
-    except IOError:
-        pass
+    settings = {}
+    with open(conf, "r") as cf:
+        for lineno, line in enumerate(cf, 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            match = re.match(r"^([A-Za-z_][A-Za-z_0-9]*)\s*=?\s*(\S+)$", line)
+            if not match:
+                print("\033[31m%s line %d: cannot read %r\033[0m"
+                      % (conf, lineno, line))
+                sys.exit(1)
+            settings[match.group(1)] = match.group(2)
 
-    print("cm_port not found in %s, falling back to %d." % (conf, DEFAULT_PORT))
-    return DEFAULT_PORT
+    missing = [key for key in ("cmsip", "port") if key not in settings]
+    if missing:
+        print("\033[31m%s does not set %s.\033[0m"
+              % (conf, " or ".join(missing)))
+        sys.exit(1)
+    if not settings["port"].isdigit():
+        print("\033[31m%s: port must be a number, not %r\033[0m"
+              % (conf, settings["port"]))
+        sys.exit(1)
+    return settings["cmsip"], int(settings["port"])
 
 
-cmsip = "localhost"
-port = findport()
+cmsip, port = load_config()
 url = "/cm_api"
 
 token = ""
@@ -231,11 +251,23 @@ ssl_context = ssl._create_unverified_context()
 
 
 def exec_task(ip, port, url, body):
+    """Send one request to the manager server.
+
+    A refused connection means the manager is not running, which is worth
+    saying plainly: as a traceback out of http.client it reads like a bug in
+    the runner rather than a service that has to be started first.
+    """
     import http.client
     conn = http.client.HTTPSConnection(ip, port, context=ssl_context)
     try:
         conn.request("POST", url, body)
         return conn.getresponse().read()
+    except (ConnectionError, socket.error) as exc:
+        print("\033[31mcannot reach the manager server at %s:%s (%s).\033[0m"
+              % (ip, port, exc))
+        print("start it with 'cubrid service start' on that host, or check "
+              "cmsip and port in %s." % CONFIG_FILE)
+        sys.exit(1)
     finally:
         conn.close()
 
@@ -1056,6 +1088,7 @@ if not dump_mode:
 
 LIST_FILE, CASE_DIR, REPORT_BASE = resolve_test_set(listarg)
 HOSTNAME = socket.gethostname()
+local_env = REPORT_BASE not in NO_LOCAL_ENV_SETS
 
 if not dump_mode:
     if not os.path.isfile(LIST_FILE):
@@ -1064,8 +1097,14 @@ if not dump_mode:
     if not os.path.isdir(CASE_DIR):
         print("no case directory for the set: %s" % CASE_DIR)
         sys.exit(2)
-    reset_leftovers()
-    restart_services()
+    if local_env:
+        reset_leftovers()
+        restart_services()
+    else:
+        # The login in init_env() is the reachability check: exec_task() reports
+        # a manager that does not answer and stops the run there.
+        print("%s runs against the instance as it is; skipping the local "
+              "fixture setup and the CUBRID service bounce." % REPORT_BASE)
 
 token, CUBRID, CUBRID_DATABASES = init_env()
 # The calls above only set up the session, the report covers the task list.
@@ -1084,11 +1123,13 @@ for _signum in (signal.SIGTERM, signal.SIGHUP):
     signal.signal(_signum, lambda signum, frame: sys.exit(128 + signum))
 
 try:
-    build_env()
+    if local_env:
+        build_env()
     do_all_jobs(token)
 finally:
-    clean_env()
-    stop_services()
+    if local_env:
+        clean_env()
+        stop_services()
 
 # The reports are named after the test set, so running both sets leaves both
 # reports behind instead of one overwriting the other.
