@@ -321,6 +321,8 @@ def record(name, casefile, task, status, note, expected, response=None,
         print(label + " : " + '\033[31mexpected {0}, got {1} ({2})\033[0m'.format(
             expected, status, note))
         print("    case file: %s" % casefile)
+        if task in DIAGNOSE_TASKS:
+            diagnose_db_state(task, casefile)
     return ok
 
 
@@ -953,6 +955,68 @@ def run_service_cmd(args, what, timeout=300):
     if not output:
         print("    (no output)")
     return returncode
+
+
+# Tasks whose failure message says what did not happen but nothing about why.
+# "stopdb: execute timeout" only means the database did not come down inside
+# the 30 s the manager waits; what was still holding it has to be looked at
+# while it is still true, so it is collected here rather than guessed at later.
+DIAGNOSE_TASKS = frozenset(("stopdb",))
+
+
+def diagnose_db_state(task, casefile):
+    """Print who still has the database of a failed case."""
+    try:
+        request = load_task(casefile)
+    except Exception:
+        return
+    if isinstance(request, list):
+        request = request[0] if request else {}
+    dbname = request.get("dbname")
+    if not dbname:
+        return
+
+    print("    --- state after %s(%s) failed" % (task, dbname))
+    cubrid_bin = os.path.join(CUBRID, "bin", "cubrid")
+    for args, what in (([cubrid_bin, "server", "status"], "server status"),
+                       ([cubrid_bin, "broker", "status"], "broker status")):
+        try:
+            done = subprocess.run(args, timeout=30, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+            out = done.stdout.decode(errors="replace").strip()
+        except Exception as exc:
+            out = "could not run: %s" % exc
+        print("    %s:" % what)
+        for line in out.split("\n")[:15]:
+            print("      " + line)
+
+    # Processes that keep a database open are what a stop waits for.
+    try:
+        done = subprocess.run(["ps", "-eo", "pid,user,args"], timeout=30,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        lines = [l for l in done.stdout.decode(errors="replace").split("\n")
+                 if ("cub_server" in l or "cub_cas" in l or "csql" in l)
+                 and "grep" not in l]
+    except Exception as exc:
+        lines = ["could not list processes: %s" % exc]
+    print("    processes holding a database:")
+    for line in lines[:15]:
+        print("      " + line.strip())
+
+    logdir = os.path.join(CUBRID, "log", "server")
+    try:
+        logs = sorted((os.path.join(logdir, f) for f in os.listdir(logdir)
+                       if f.startswith(dbname)), key=os.path.getmtime)
+    except OSError:
+        logs = []
+    if logs:
+        print("    %s (last 20 lines):" % logs[-1])
+        with open(logs[-1], errors="replace") as f:
+            for line in f.read().split("\n")[-20:]:
+                if line:
+                    print("      " + line)
+    else:
+        print("    no server log for %s under %s" % (dbname, logdir))
 
 
 def restart_services():

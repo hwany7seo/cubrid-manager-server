@@ -222,6 +222,19 @@ jobs:
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
 
+      # A build from source installs this repository's own cm.conf, which has
+      # support_mon_statistic=NO, while the released packages ship YES. With it
+      # off the monitoring gather never runs, and set_mon_interval and the
+      # volume cases of get_mon_statistic fail on data that was never collected.
+      - name: Turn on monitoring statistics
+        run: |
+          set -euo pipefail
+          conf="$GITHUB_WORKSPACE/CUBRID/conf/cm.conf"
+          sed -i -E 's/^([[:space:]]*support_mon_statistic[[:space:]]*=?[[:space:]]*).*/\1YES/' "$conf"
+          grep -q -i 'support_mon_statistic.*YES' "$conf" \
+            || { echo "support_mon_statistic is not YES in $conf"; cat "$conf"; exit 1; }
+          grep -n -i 'support_mon_statistic' "$conf" | sed 's/^/  /'
+
       # Only the database is created here; the suite starts the service itself
       # to reach a known state before the first case.
       - name: Create demodb
@@ -341,5 +354,7 @@ jobs:
           path: |
             cubrid/cubridmanager/server/test/run.log
             cubrid/cubridmanager/server/test/log/
+            CUBRID/log/
+            CUBRID/conf/cm.conf
           retention-days: 14
           if-no-files-found: warn
