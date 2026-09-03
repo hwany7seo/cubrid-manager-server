@@ -478,6 +478,9 @@ def report_status_only(name, entries):
                       item["expected"], item["status"], item["note"]))
 
 
+SLEEP_LINE = re.compile(r"^sleep[ \t]+(\d+(?:\.\d+)?)$")
+
+
 def do_all_jobs(token):
     with open(LIST_FILE, "r") as tasks:
         for line in tasks:
@@ -486,6 +489,23 @@ def do_all_jobs(token):
                 continue
             if line[0] == '/':
                 print('\n\033[33m{0}\033[0m'.format(line))
+                continue
+            # "sleep <seconds>" waits before the next case. Tasks that answer
+            # before their work is done need it: the request returns, but the
+            # database is still busy, and the next case on the same database is
+            # refused while it is. It is a scenario decision, not a property of
+            # a case, so it lives in the list rather than in a case file.
+            wait = SLEEP_LINE.match(line)
+            if wait:
+                if no_sleep:
+                    # A server that answers only when the work is done has
+                    # nothing to wait for, and the waits are the bulk of the
+                    # run; the same list then serves both kinds of server.
+                    print("\033[33m%s (ignored, --no-sleep)\033[0m" % line)
+                    continue
+                seconds = float(wait.group(1))
+                print("sleep %s" % wait.group(1))
+                time.sleep(seconds)
                 continue
             name, expected, status_only = parse_list_line(line)
             do_one_job(name, case_path(name), token, expected,
@@ -1114,7 +1134,7 @@ def init_env():
 
 
 # Command line:
-#   test_tasks.py [<test set>] [-fc|--file-check]
+#   test_tasks.py [<test set>] [-fc|--file-check] [-ns|--no-sleep]
 #   test_tasks.py --dump <case> [<case> ...]
 #
 # <test set> is the list file of the set to run, "task_status_check.txt" by
@@ -1125,6 +1145,10 @@ def init_env():
 #
 # --answer regenerates those .answer files. Nothing else writes them: adopting
 # today's response as tomorrow's baseline has to be asked for.
+#
+# --no-sleep drops the "sleep <seconds>" lines of the list. They are there for
+# servers whose tasks answer before their work is done; against one that does
+# not, they are only lost time.
 #
 # Both take the CUBRID version the baseline belongs to, "11.4" or "11_4", as a
 # bare argument; without one, DEFAULT_VERSION is used. The same request answers
@@ -1141,6 +1165,7 @@ args = sys.argv[1:]
 dump_mode = bool(args) and args[0] == "--dump"
 file_check = False
 make_answer = False
+no_sleep = False
 listarg = DEFAULT_TEST_SET
 VERSION = DEFAULT_VERSION
 
@@ -1151,6 +1176,8 @@ if not dump_mode:
             file_check = True
         elif arg in ("-a", "--answer"):
             make_answer = True
+        elif arg in ("-ns", "--no-sleep"):
+            no_sleep = True
         elif arg.startswith("-"):
             print("unknown option: %s" % arg)
             sys.exit(2)

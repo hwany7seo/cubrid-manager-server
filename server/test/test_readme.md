@@ -47,6 +47,9 @@ cd server/test
 # 기준값(.answer) 재생성 -- 이 옵션 없이는 생성되지 않는다
 ./run_tests.sh -a 11.4 task_result_check.txt
 
+# 목록의 sleep 줄 무시 (비동기 처리가 없는 서버용)
+./run_tests.sh -ns
+
 # task_test_case/ 의 모든 세트를 차례로 실행
 ./run_tests.sh --all
 
@@ -223,8 +226,52 @@ server/test/
 <name>              # 결과 비교 대상. -fc 에서 <name>.answer 와 대조한다
 <name>,success      # status 만 검사 (success 기대). 기준값을 갖지 않는다
 <name>,failure      # status 만 검사 (failure 기대). 부정 테스트
+sleep <초>          # 다음 케이스 전까지 대기 (예: sleep 10, sleep 20)
                     # 빈 줄은 무시 (가독성용 구분)
 // ...              # '/'로 시작하면 주석/구분 헤더 (실행 안 함)
+```
+
+### `sleep <초>` — 비동기 task 뒤의 대기
+
+일부 task는 **작업이 끝나기 전에 응답한다.** 요청은 성공으로 돌아오지만 DB는 아직
+바쁘고, 같은 DB를 건드리는 다음 케이스가 거부된다. 서버가 상호 배타로 막는 task라면
+`another task is running` 류로 실패한다.
+
+케이스 파일이 아니라 **목록에 적는다.** 대기가 필요한지는 그 케이스의 성질이 아니라
+바로 뒤에 무엇이 오는지에 달린 시나리오 문제이기 때문이다.
+
+```
+createdb
+sleep 10
+startdb
+sleep 10
+```
+
+- 값은 초 단위, 소수점도 된다 (`sleep 0.5`)
+- 무거운 케이스는 그 줄만 올리면 된다 (`sleep 20`)
+- 실패를 기대하는 케이스(`,failure`)에는 붙이지 않는다. 거부된 요청은 아무 작업도
+  시작하지 않는다
+
+**`-ns` / `--no-sleep`** — 목록의 `sleep` 줄을 전부 무시한다. 비동기 처리가 들어가지
+않은 서버에는 기다릴 이유가 없고, 대기가 실행 시간의 대부분이기 때문이다. 목록 하나로
+두 종류의 서버를 다 검증할 수 있다.
+
+```sh
+./run_tests.sh -ns
+./run_tests.sh -ns -fc 11.4 task_result_check.txt
+```
+
+무시된 줄은 로그에 `sleep 10 (ignored, --no-sleep)`으로 남아, 목록에 대기가 있었는데
+건너뛴 것인지 애초에 없었던 것인지 구분된다.
+
+현재 두 목록에는 아래 task를 성공 기대로 실행하는 케이스 뒤에 `sleep 10`이 들어 있다
+(각 36곳, 실행 시간 6분 증가).
+
+```
+addvoldb  backupdb  broker_restart  broker_start  broker_stop  checkdb
+compactdb  copydb  createdb  deletedb  ha_reload  ha_start  ha_stop
+loaddb  lockdb  optimizedb  renamedb  restoredb  start_statdump
+startbroker  startdb  stop_statdump  stopbroker  stopdb  unloaddb
 ```
 
 **`,<status>`가 붙으면 그 케이스는 status 검사 전용이다.** `-a`로도 기준값을 만들지 않고,
