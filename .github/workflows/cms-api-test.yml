@@ -252,10 +252,19 @@ jobs:
           export CUBRID_DATABASES="$CUBRID/databases"
           export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
-          mkdir -p "$CUBRID_DATABASES"
+          # make_cubrid_demo.sh runs "cubrid createdb demodb" with no path, so
+          # the volumes land in the current directory. An installed CUBRID puts
+          # them in $CUBRID_DATABASES/demodb, and the cases address them there
+          # (get_mon_statistic asks for $CUBRID_DATABASES/demodb/demodb), so the
+          # script has to be run from that directory.
+          mkdir -p "$CUBRID_DATABASES/demodb"
+          cd "$CUBRID_DATABASES/demodb"
           sh "$CUBRID/demo/make_cubrid_demo.sh"
           grep -q '^demodb' "$CUBRID_DATABASES/databases.txt" \
             || { echo "demodb was not registered in databases.txt"; exit 1; }
+          test -f "$CUBRID_DATABASES/demodb/demodb" \
+            || { echo "the demodb volume is not where the cases expect it:"
+                 cat "$CUBRID_DATABASES/databases.txt"; exit 1; }
           timeout 300 cubrid service stop || echo "service stop returned $?"
           EOS
           chmod 0755 /tmp/demodb-as-cubrid.sh
