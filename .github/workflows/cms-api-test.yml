@@ -61,6 +61,11 @@ jobs:
     timeout-minutes: 180
     container:
       image: rockylinux/rockylinux:8.10
+      # --init puts a reaping init at PID 1. Without it an exited cub_server is
+      # reparented to a PID 1 that never calls wait(), so it stays <defunct>;
+      # the manager's stopdb waits for the process to be reaped and gives up
+      # with "execute timeout" even though the database is already down.
+      options: --init
 
     steps:
       # Before the checkouts: actions/checkout needs git in the container, or

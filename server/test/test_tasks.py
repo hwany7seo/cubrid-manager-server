@@ -961,11 +961,36 @@ def run_service_cmd(args, what, timeout=300):
 # "stopdb: execute timeout" only means the database did not come down inside
 # the 30 s the manager waits; what was still holding it has to be looked at
 # while it is still true, so it is collected here rather than guessed at later.
-DIAGNOSE_TASKS = frozenset(("stopdb",))
+DIAGNOSE_TASKS = frozenset(("stopdb", "get_mon_statistic"))
+
+
+def diagnose_mon_meta():
+    """Print what the monitoring meta actually holds.
+
+    "Can't find volname[...]" says the volume asked for is not registered, but
+    not what is registered instead, and the answer changes as gathers run.
+    """
+    meta = os.path.join(CUBRID, "var", "manager", "mon_data", "meta.json")
+    print("    --- monitoring meta")
+    try:
+        with open(meta) as f:
+            data = json.load(f)
+    except (IOError, ValueError) as exc:
+        print("      cannot read %s: %s" % (meta, exc))
+        return
+    print("      k_total_vol_num: %s" % data.get("k_total_vol_num"))
+    print("      k_interval: %s" % data.get("k_interval"))
+    print("      k_db_rrd: %s" % json.dumps(data.get("k_db_rrd"), indent=None))
+    print("      meta.json mtime: %s"
+          % time.strftime("%H:%M:%S", time.localtime(os.path.getmtime(meta))))
+    print("      now:             %s" % time.strftime("%H:%M:%S"))
 
 
 def diagnose_db_state(task, casefile):
     """Print who still has the database of a failed case."""
+    if task == "get_mon_statistic":
+        diagnose_mon_meta()
+        return
     try:
         request = load_task(casefile)
     except Exception:
