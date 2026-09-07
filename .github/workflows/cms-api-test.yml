@@ -12,15 +12,16 @@ name: CMS API test
 # blocking, replace the "exit 0" at the end of the test step with
 # "exit $status" and mark this check as required for develop.
 #
-# In a fork, pushing any branch runs it; in CUBRID/cubrid-manager-server only
-# pull requests to develop and manual runs do. Set the repository variable
-# ENGINE_REPO or pass engine_repo to build against a fork of the engine.
+# It runs on pull requests against the branch named under "on" below, and on
+# demand. A manual run needs the workflow file on the repository's default
+# branch, or the button does not appear.
+#
+# Set the repository variable ENGINE_REPO, or pass engine_repo to a manual run,
+# to build against a fork of the engine instead of CUBRID/cubrid.
 
 on:
   pull_request:
-    branches: [develop]
-  push:
-    branches: ['**']
+    branches: [gitaction_test]
   workflow_dispatch:
     inputs:
       engine_repo:
@@ -38,7 +39,6 @@ concurrency:
 
 defaults:
   run:
-    # A container job would otherwise use sh; these steps use bash syntax.
     shell: bash
 
 permissions:
@@ -54,9 +54,6 @@ env:
 
 jobs:
   cms-api-test:
-    if: >-
-      github.event_name != 'push' ||
-      github.repository != 'CUBRID/cubrid-manager-server'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     container:
@@ -82,7 +79,7 @@ jobs:
             || echo "could not enable CRB; some packages may be missing"
 
           dnf -y install \
-            git gcc gcc-c++ make bison flex \
+            git gcc gcc-c++ make bison flex ccache \
             libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
             elfutils-libelf-devel libstdc++-static \
@@ -123,6 +120,25 @@ jobs:
             || { echo "libstdc++.a is missing"; exit 1; }
           test -f /usr/include/nlist.h \
             || { echo "nlist.h is missing"; exit 1; }
+          # The EL package installs the compiler shims here; putting the
+          # directory first on PATH is what routes the build through ccache,
+          # for the engine and for the 3rdparty projects alike.
+          test -x /usr/lib64/ccache/c++ \
+            || { echo "the ccache compiler shims are missing"; exit 1; }
+
+      # Restored before the workspace is handed to the cubrid user, so that the
+      # chown below covers the cache too.
+      #
+      # A cache is only visible to its own branch and to the default branch.
+      # Pushes to develop do not run here, so nothing warms a shared cache: the
+      # first run of a PR is always cold, and the later commits of that same PR
+      # are the ones that hit.
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-rocky8-${{ github.run_id }}
+          restore-keys: ccache-rocky8-
 
       # The manager server is a submodule of the engine at path cubridmanager,
       # so the engine is checked out and this PR replaces that submodule.
@@ -156,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           useradd -m -s /bin/bash cubrid
-          mkdir -p "$GITHUB_WORKSPACE/CUBRID"
+          mkdir -p "$GITHUB_WORKSPACE/CUBRID" "$GITHUB_WORKSPACE/.ccache"
           chown -R cubrid:cubrid "$GITHUB_WORKSPACE"
 
       - name: Build CUBRID with this manager server
@@ -168,14 +184,27 @@ jobs:
 
           cat > /tmp/build-as-cubrid.sh <<'EOS'
           set -euo pipefail
+          ccache --max-size="$CCACHE_MAXSIZE"
+          ccache --zero-stats >/dev/null
           cd "$WORKSPACE/cubrid"
+          # set -e is dropped around the build so that the statistics below are
+          # printed on a failure too: a cache that stopped being hit is
+          # invisible otherwise, and the run only looks slower for no reason.
+          set +e
           ./build.sh -m release -g ninja -j "$JAVA_HOME" \
             -p "$WORKSPACE/CUBRID" build
+          rc=$?
+          set -e
+          echo "===== ccache"
+          ccache --show-stats | grep -E 'cache hit|cache miss|cache size|files in cache'
+          exit $rc
           EOS
           chmod 0755 /tmp/build-as-cubrid.sh
 
           set +e
-          runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
+          runuser -u cubrid -- env HOME=/home/cubrid \
+            PATH="/usr/lib64/ccache:$PATH" \
+            CCACHE_DIR="$GITHUB_WORKSPACE/.ccache" CCACHE_MAXSIZE=2G \
             JAVA_HOME="$JAVA_HOME" WORKSPACE="$GITHUB_WORKSPACE" \
             bash /tmp/build-as-cubrid.sh
           rc=$?
