@@ -234,13 +234,8 @@ jobs:
           set -euo pipefail
           export CUBRID="$WORKSPACE/CUBRID"
           export CUBRID_DATABASES="$CUBRID/databases"
-          export LD_LIBRARY_PATH="$CUBRID/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$CUBRID/lib:$CUBRID/cci/lib:${LD_LIBRARY_PATH:-}"
           export PATH="$CUBRID/bin:$PATH"
-          # make_cubrid_demo.sh runs "cubrid createdb demodb" with no path, so
-          # the volumes land in the current directory. An installed CUBRID puts
-          # them in $CUBRID_DATABASES/demodb, and the cases address them there
-          # (get_mon_statistic asks for $CUBRID_DATABASES/demodb/demodb), so the
-          # script has to be run from that directory.
           mkdir -p "$CUBRID_DATABASES/demodb"
           cd "$CUBRID_DATABASES/demodb"
           sh "$CUBRID/demo/make_cubrid_demo.sh"
