@@ -108,6 +108,12 @@ jobs:
           gcc --version | head -1
           ninja --version
 
+          url=https://github.com/Kitware/CMake/releases/download
+          curl -fsSL "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
+            | tar xz -C /opt
+          echo "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin" >> "$GITHUB_PATH"
+          "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin/cmake" --version | head -1
+
           # Checked here so a missing piece fails with a clear reason instead
           # of as an obscure error deep in the build.
           command -v pgrep >/dev/null || { echo "pgrep is missing"; exit 1; }
@@ -117,16 +123,6 @@ jobs:
             || { echo "libstdc++.a is missing"; exit 1; }
           test -f /usr/include/nlist.h \
             || { echo "nlist.h is missing"; exit 1; }
-
-      - name: Install CMake ${{ env.CMAKE_VERSION }}
-        # Rocky 8 ships 3.20 and the engine asks for 3.21.
-        run: |
-          set -euo pipefail
-          url=https://github.com/Kitware/CMake/releases/download
-          curl -fsSL "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
-            | tar xz -C /opt
-          echo "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin" >> "$GITHUB_PATH"
-          "/opt/cmake-$CMAKE_VERSION-linux-x86_64/bin/cmake" --version | head -1
 
       # The manager server is a submodule of the engine at path cubridmanager,
       # so the engine is checked out and this PR replaces that submodule.
@@ -153,18 +149,6 @@ jobs:
           full=$(tr -d '[:space:]' < VERSION)
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "engine VERSION=$full"
-
-      - name: Cap the libtbb build parallelism
-        # libtbb builds with a bare "make -j", which starts one compiler per
-        # translation unit at once. Belongs upstream as
-        # "make -j${CMAKE_BUILD_PARALLEL_LEVEL}".
-        working-directory: cubrid
-        run: |
-          set -euo pipefail
-          f=3rdparty/CMakeLists.txt
-          sed -i -E "s/(BUILD_COMMAND[[:space:]]+make) -j$/\1 -j$(nproc)/;
-                     s/(INSTALL_COMMAND[[:space:]]+make) -j install$/\1 -j$(nproc) install/" "$f"
-          grep -n -- 'make -j' "$f" | sed 's/^/  /'
 
       # CUBRID is meant to be run by its own unprivileged owner, and a
       # container job is root, so everything from here runs as cubrid.
