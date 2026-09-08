@@ -295,7 +295,7 @@ jobs:
           export PYTHONUNBUFFERED=1
           cd "$WORKSPACE/cubrid/cubridmanager/server/test"
           timeout --signal=INT --kill-after=1m 50m \
-            ./run_tests.sh "$TEST_SET" </dev/null 2>&1 | tee run.log
+            ./run_tests.sh -ns "$TEST_SET" </dev/null 2>&1 | tee run.log
           exit ${PIPESTATUS[0]}
           EOS
           chmod 0755 /tmp/test-as-cubrid.sh

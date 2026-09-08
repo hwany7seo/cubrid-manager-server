@@ -3,3 +3,4 @@ log/
 task_test_case/*/*/*.result
 *.log
 csql.*
+!task_test_config/*.log

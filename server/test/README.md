@@ -102,8 +102,9 @@ server/test/
       <case>.answer                     기준 응답 (커밋 대상)
       <case>.result                     -fc 실행 결과 (git 미추적)
     task_result_check/11_5/  11_2/  11_0/  10_2/
-  task_test_config/                   설정/픽스처 (`tmp_file_for_test/` 등)
-  task_test_sql/                      로드용 SQL (`import.sql`)
+  task_test_config/                   케이스가 읽을 픽스처
+    test_analyzecaslog.sql.log          analyzecaslog 용 CAS 로그
+    tmp_file_for_test/                  getcaslogtopresult / removecasrunnertmpfile 용
   log/                                리포트 출력 (git 미추적)
     task_status_check.xml
     task_status_check_detail.xml
@@ -538,6 +539,8 @@ task_test_case/task_status_check/unloaddb_optional  # as-dba 등 선택 파라�
   붙기 때문이다.
 - 케이스 파일의 `token`은 **빈 문자열로 둔다**. 러너가 항상 실제 토큰을 채워 넣는다.
 - 새 픽스처가 필요하면 `task_test_config/`에 넣고 `build_env()`에서 배치하도록 한다.
+  거기 있기만 하고 아무도 읽지 않는 파일은 두지 않는다. 러너가 실제로 쓰는 것은
+  `TEST_CONFIG_DIR`을 참조하는 두 곳(`tmp_file_for_test/` 복사, CAS 로그 복사)뿐이다.
 - `.answer`는 커밋한다(기준값). `.result`는 `.gitignore`에 걸려 있다.
 - 기준값은 **버전 디렉터리 안**에 있다. 다른 엔진에서 만든 것을 옮겨 쓰지 말 것.
 - 기준값은 **`-a`를 줄 때만** 갱신된다. 서버 응답이 바뀐 것을 확인하고 의도적으로
