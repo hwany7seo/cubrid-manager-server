@@ -38,6 +38,7 @@ cd server/test
 ./run_tests.sh
 
 # 다른 세트 실행
+./run_tests.sh task_test_case/task_result_check.txt
 ./run_tests.sh task_result_check.txt
 
 # 결과 파일 비교 모드 (.answer 대조). 버전을 생략하면 11.4
@@ -502,102 +503,12 @@ task_test_case/task_status_check/unloaddb_optional  # as-dba 등 선택 파라�
 
 기준값을 쓰고 싶으면 `-a`로 만든다. 세트 이름과는 무관하다(4.5 참고).
 
-### 5.4 기존 API 변경
-
-- **요청 파라미터 변경**: 해당 `task_test_case/<세트>/<task>` 수정.
-- **성공/실패 조건 변경**: 목록 파일의 기대값(`,failure` 유무) 조정.
-- **응답 구조 변경**: 러너는 `status`만 보므로 통과 여부엔 영향이 없지만,
-  `docs/api/<task>.md`의 Response 규격/샘플을 실제 응답에 맞춰 갱신한다.
-
-### 5.5 문서 샘플을 실제 응답과 맞추기
-
-`./run_tests.sh` 한 번이면 `log/<세트>_detail.xml`에 모든 케이스의 **응답 원문**이 남는다.
-`docs/api/<task>.md`의 Response Sample은 이 값을 기준으로 갱신한다.
-(`--dump`도 쓸 수 있지만 `deletedb` / `setsysparam` 같은 파괴적 task에는 부작용이 있다.)
-
-두 가지 규칙이 있다.
-
-- **Request Sample과 Response Sample은 같은 요청/응답 한 쌍이어야 한다.** 서버가 요청 값을
-  그대로 되돌려 주는 필드(`addvoldb`의 `dbname`, `kill_process`의 `name` 등)는 Request
-  Sample 쪽 값에 맞춘다. 테스트가 쓰는 `alatestdb` 같은 이름을 그대로 옮기면 문서만 보고
-  따라 할 수 없다.
-- **서버가 값을 가공하는 필드는 실제 응답을 그대로 둔다.** 예: `getaddbrokerinfo`는
-  `brokerconf` 요청에 `broker`로 답하고, `getcmsenv`는 `task`를 `getversion`으로 답한다.
-  요청에 맞춰 고치면 오히려 틀린 문서가 된다.
-
-### 5.6 API 제거/미지원
-
-- 서버에서 제거된 task는 세트의 목록 파일에서 삭제하거나 `//`로 주석 처리한다.
-  (미등록 task를 남기면 `Undefined request`로 항상 실패한다)
-
-### 5.7 지켜야 할 규칙
-
-- 목록 파일(`task_test_case/<세트>.txt`)은 **ASCII로 유지**한다. 러너가 UTF-8 로케일에서
-  텍스트로 읽으므로, 비ASCII(예: 한글 주석 EUC-KR) 바이트가 섞이면 목록 파싱 단계에서
-  크래시한다. 주석은 영문으로 작성한다.
-- 케이스 파일에는 **확장자를 붙이지 않는다.** `.answer` / `.result`가 같은 이름 옆에
-  붙기 때문이다.
-- 케이스 파일의 `token`은 **빈 문자열로 둔다**. 러너가 항상 실제 토큰을 채워 넣는다.
-- 새 픽스처가 필요하면 `task_test_config/`에 넣고 `build_env()`에서 배치하도록 한다.
-  거기 있기만 하고 아무도 읽지 않는 파일은 두지 않는다. 러너가 실제로 쓰는 것은
-  `TEST_CONFIG_DIR`을 참조하는 두 곳(`tmp_file_for_test/` 복사, CAS 로그 복사)뿐이다.
-- `.answer`는 커밋한다(기준값). `.result`는 `.gitignore`에 걸려 있다.
-- 기준값은 **버전 디렉터리 안**에 있다. 다른 엔진에서 만든 것을 옮겨 쓰지 말 것.
-- 기준값은 **`-a`를 줄 때만** 갱신된다. 서버 응답이 바뀐 것을 확인하고 의도적으로
-  받아들일 때만 실행할 것. 그렇지 않으면 회귀를 기준값으로 굳혀 버린다.
-
 ---
 
-## 6. 주의사항 / 한계
-
-- 목록 파일에는 `createdb` / `deletedb` / `stopdb` 같은 **상태 변경·파괴적 작업**이
-  포함된다. **테스트 전용 인스턴스**에서 실행할 것. 운영 DB에 돌리지 말 것.
-- 일부 API는 환경 의존적이라 이 목록만으로는 검증되지 않을 수 있다:
-  HA 미구성 시 `heartbeatlist` / `ha_*`, shard 미구성 시 `getshardinfo` 등.
-- `--dump`도 대상 task에 따라 부작용이 있을 수 있다(예: `setsysparam`은 파일을 쓴다).
-  읽기 전용 task에만 쓰는 것이 안전하다.
-- **기준값은 엔진 버전에 묶여 있다.** `$CUBRID`가 가리키는 설치를 바꾼 뒤 `-fc`를 돌리면
-  대부분의 케이스가 실패한다. 실패가 아니라 버전이 바뀐 것일 수 있으니, 먼저
-  `cubrid_rel`로 버전을 확인하고 그 버전 디렉터리를 쓰고 있는지 볼 것.
-
----
-
-## 7. 관련 파일
+## 6. 관련 파일
 
 - 서버측 task 등록표: `server/src/cm_server_util.cpp`의 `task_info[]`,
   `server/src/cm_server_extend_interface.cpp`의 `ext_task_info[]`
 - API 문서: `docs/api/<task>.md` (요청/응답 규격)
-- 실행 스크립트: `run_tests.sh` (옛 `Makefile`은 제거됨. `lcov` 타깃도 함께 정리했다)
+- 실행 스크립트: `run_tests.sh`
 
-## 추가 할일
-- 아래 목록의 할일을 할때마다 변경사항에 대해서 이 문서도 업데이트 해야 합니다.
-
-### 2026-08-21 — 적용 완료
-
-원문 요청과 적용 결과. 문서 본문(2, 3, 4.1, 4.3, 4.4, 4.5, 5.1~5.7, 6, 7절)은 모두
-새 구조에 맞춰 갱신했다.
-
-| 요청 | 적용 |
-| --- | --- |
-| Makefile을 bash shell script로 변경, 불필요한 사항 제거 | `Makefile` 삭제, `run_tests.sh` 추가. `lcov` 타깃과 `TEST_XML` 환경변수는 함께 제거 |
-| 케이스 파일의 `.txt` 확장자 제거 | 208개 전부 확장자 없이 배치. 러너의 경로 조립도 `case_path()`로 통일 |
-| `task_test_case_json` 폴더를 `task_test_case`로 변경 | 완료. 이름을 쓰던 옛 소켓 코퍼스는 이미 삭제된 상태였다 |
-| `task_list.txt`을 `task_test_case` 안으로 이동하고 `task_status_check.txt`로 개명 | 완료 |
-| 케이스 json을 `task_test_case/task_status_check/`로 이동 | 완료 |
-| `test_tasks.py <목록>.txt`로 실행, 목록을 읽어 하위 폴더의 json으로 테스트 | 완료. 목록 이름이 곧 케이스 디렉터리 이름이다 (`resolve_test_set()`) |
-| `task_result_check.txt` 세트를 동일하게 생성, 1차 테스트 후 `.answer` 생성 | 완료. 생성은 `-a` / `--answer` 전용으로 바꿨다 (기본 실행은 파일을 쓰지 않는다) |
-| `-fc` / `--file-check`로 `.result` 생성 후 `.answer`와 비교, 다르면 failed | 완료. 비교할지 status로 볼지는 목록의 `,<status>` 선언이 결정한다 (4.5 참고) |
-| log 이름을 테스트 세트 이름으로 | `log/<세트>.xml`, `log/<세트>_detail.xml` |
-
-구현하면서 요청에 없던 판단을 세 가지 했다. 근거는 4.5에 적어 두었다.
-
-1. **정규화** — 응답을 그대로 비교하면 213건 중 33건이 매번 실패한다. 전부 pid·경과
-   시간·여유 공간·임시 파일명처럼 실행마다 바뀌는 값이었다. `VOLATILE_KEYS`(키 단위)와
-   `VOLATILE_PATTERNS`(모양 단위)로 걸러낸다.
-2. **기준값을 가질 수 없는 케이스 5건** — `loadaccesslog`, `getloginfo`,
-   `get_mon_statistic`, `getautoexecqueryerrlog`와 그 `_optional`은 응답이 실행 자체와
-   함께 자라 기준값을 가질 수 없다. 목록에서 `,success`를 붙여 status 전용으로 선언했다.
-   `getautoexecqueryerrlog`는 스케줄러가 로그를 append 하는 탓에 매번이 아니라
-   간헐적으로 틀어져서 늦게 드러났다.
-3. **중복 등장 케이스** — `startinfo`는 목록에 두 번 나오고 두 응답이 다르다. 두 번째
-   이후는 `<case>.2.answer`로 따로 기준값을 갖는다.
