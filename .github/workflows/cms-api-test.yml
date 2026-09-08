@@ -3,21 +3,8 @@ name: CMS API test
 # Builds CUBRID with this PR's manager server and runs server/test against it.
 #
 # The build runs in a Rocky Linux 8.10 container so that CUBRID is compiled
-# with the GCC 8 toolchain the product targets; on the runner's GCC 13 the
-# engine does not compile, because it promotes warnings to errors and GCC 13
-# reports things GCC 8 does not.
+# with the GCC 8 toolchain the product targets.
 #
-# The result never blocks a merge: the job finishes green either way and says
-# PASS or FAIL in the job summary and in a comment on the PR. To make it
-# blocking, replace the "exit 0" at the end of the test step with
-# "exit $status" and mark this check as required for develop.
-#
-# It runs on pull requests against the branch named under "on" below, and on
-# demand. A manual run needs the workflow file on the repository's default
-# branch, or the button does not appear.
-#
-# Set the repository variable ENGINE_REPO, or pass engine_repo to a manual run,
-# to build against a fork of the engine instead of CUBRID/cubrid.
 
 on:
   pull_request:
@@ -302,8 +289,7 @@ jobs:
             echo "above is where it stopped making progress"
           fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          # Reported, not enforced.
-          exit 0
+          exit $status
 
       - name: Summarise the result
         id: summary
@@ -346,7 +332,6 @@ jobs:
               echo "</details>"
             fi
             echo
-            echo "This check never blocks the merge; it only reports."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the result on the PR
@@ -360,7 +345,6 @@ jobs:
 
             engine `${{ env.ENGINE_REPO }}@${{ env.ENGINE_REF }}` (VERSION ${{ steps.version.outputs.full }}),
             test set `${{ env.TEST_SET }}`, built on Rocky Linux 8.10.
-            See the job summary for the failing cases. This check does not block the merge.
 
       - name: Upload the reports
         if: always()
