@@ -58,10 +58,6 @@ jobs:
     timeout-minutes: 180
     container:
       image: rockylinux/rockylinux:8.10
-      # --init puts a reaping init at PID 1. Without it an exited cub_server is
-      # reparented to a PID 1 that never calls wait(), so it stays <defunct>;
-      # the manager's stopdb waits for the process to be reaped and gives up
-      # with "execute timeout" even though the database is already down.
       options: --init
 
     steps:
@@ -126,14 +122,8 @@ jobs:
           test -x /usr/lib64/ccache/c++ \
             || { echo "the ccache compiler shims are missing"; exit 1; }
 
-      # Restored before the workspace is handed to the cubrid user, so that the
-      # chown below covers the cache too.
-      #
-      # A cache is only visible to its own branch and to the default branch.
-      # Pushes to develop do not run here, so nothing warms a shared cache: the
-      # first run of a PR is always cold, and the later commits of that same PR
-      # are the ones that hit.
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
@@ -181,9 +171,13 @@ jobs:
           JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
           java -version 2>&1 | head -1
           echo "cores: $(nproc), memory: $(free -g | awk '/^Mem:/{print $2"G"}')"
+          echo "cache restored from: ${{ steps.ccache.outputs.cache-matched-key || '(nothing)' }}"
+          du -sh "$GITHUB_WORKSPACE/.ccache" 2>/dev/null || echo "  .ccache is empty"
 
           cat > /tmp/build-as-cubrid.sh <<'EOS'
           set -euo pipefail
+          echo "gcc resolves to $(command -v gcc)"
+          echo "g++ resolves to $(command -v g++)"
           ccache --max-size="$CCACHE_MAXSIZE"
           ccache --zero-stats >/dev/null
           cd "$WORKSPACE/cubrid"
@@ -299,10 +293,10 @@ jobs:
           exit ${PIPESTATUS[0]}
           EOS
           chmod 0755 /tmp/test-as-cubrid.sh
+          status=0
           runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
             WORKSPACE="$GITHUB_WORKSPACE" TEST_SET="$TEST_SET" \
-            bash /tmp/test-as-cubrid.sh
-          status=$?
+            bash /tmp/test-as-cubrid.sh || status=$?
           if [ $status -eq 124 ] || [ $status -eq 137 ]; then
             echo "the suite did not finish in time; the last case in run.log"
             echo "above is where it stopped making progress"
