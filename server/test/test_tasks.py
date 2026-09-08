@@ -321,9 +321,37 @@ def record(name, casefile, task, status, note, expected, response=None,
         print(label + " : " + '\033[31mexpected {0}, got {1} ({2})\033[0m'.format(
             expected, status, note))
         print("    case file: %s" % casefile)
+        print_response(response)
         if task in DIAGNOSE_TASKS:
             diagnose_db_state(task, casefile)
     return ok
+
+
+# A failed response usually says more than its "note". Tasks that run a utility
+# put its output in the response as well (ts_loaddb feeds both the stdout and
+# the stderr of loaddb through file_to_nvpairs, then deletes the files), so the
+# only place that output survives is the response itself. It used to reach the
+# detailed XML and nowhere else, which meant reading an artifact to find out
+# why a case failed.
+RESPONSE_LINES = 40
+RESPONSE_CHARS = 4000
+
+
+def print_response(response):
+    if not response:
+        return
+    try:
+        text = json.dumps(json.loads(response), indent=3, sort_keys=True,
+                          ensure_ascii=False)
+    except (ValueError, TypeError):
+        text = str(response)
+    lines = text.split("\n")
+    print("    --- response")
+    for line in lines[:RESPONSE_LINES]:
+        print("    " + line[:RESPONSE_CHARS])
+    if len(lines) > RESPONSE_LINES:
+        print("    ... %d more lines (full text in log/%s_detail.xml)"
+              % (len(lines) - RESPONSE_LINES, REPORT_BASE))
 
 
 def send_one(name, req, token, expected="success", casefile=""):
@@ -981,7 +1009,7 @@ def run_service_cmd(args, what, timeout=300):
 # "stopdb: execute timeout" only means the database did not come down inside
 # the 30 s the manager waits; what was still holding it has to be looked at
 # while it is still true, so it is collected here rather than guessed at later.
-DIAGNOSE_TASKS = frozenset(("stopdb", "get_mon_statistic"))
+DIAGNOSE_TASKS = frozenset(("stopdb", "get_mon_statistic", "loaddb"))
 
 
 def diagnose_mon_meta():
@@ -1006,10 +1034,54 @@ def diagnose_mon_meta():
     print("      now:             %s" % time.strftime("%H:%M:%S"))
 
 
+def diagnose_loaddb(request):
+    """Print what loaddb was pointed at, and its own log.
+
+    loaddb consumes files this suite produced earlier in the run, and a case
+    ahead of it may have deleted them (delete_orignal_files) or left them
+    half written. Whether they are there at all is the first thing to know.
+    """
+    print("    --- loaddb input")
+    for key in ("schema", "object", "index"):
+        value = request.get(key)
+        if not value or value == "none":
+            print("      %-8s %s" % (key, value or "(not given)"))
+            continue
+        path = replace_env_vars(value)
+        if os.path.isfile(path):
+            print("      %-8s %s (%d bytes)"
+                  % (key, path, os.path.getsize(path)))
+        else:
+            print("      %-8s %s \033[31m(missing)\033[0m" % (key, path))
+
+    # loaddb writes <db>_loaddb.log next to wherever it ran.
+    dbname = request.get("dbname", "")
+    for root in (os.getcwd(), CUBRID, CUBRID_DATABASES,
+                 os.path.join(CUBRID_DATABASES, dbname)):
+        log = os.path.join(root, "%s_loaddb.log" % dbname)
+        if os.path.isfile(log):
+            print("    %s (last 20 lines):" % log)
+            with open(log, errors="replace") as f:
+                for line in f.read().split("\n")[-20:]:
+                    if line:
+                        print("      " + line)
+            return
+    print("    no %s_loaddb.log found" % dbname)
+
+
 def diagnose_db_state(task, casefile):
     """Print who still has the database of a failed case."""
     if task == "get_mon_statistic":
         diagnose_mon_meta()
+        return
+    if task == "loaddb":
+        try:
+            request = load_task(casefile)
+        except Exception:
+            return
+        if isinstance(request, list):
+            request = request[0] if request else {}
+        diagnose_loaddb(request)
         return
     try:
         request = load_task(casefile)
