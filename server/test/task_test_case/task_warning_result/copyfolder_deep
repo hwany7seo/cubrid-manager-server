@@ -1,0 +1,4 @@
+{"task":"copyfolder",
+"token":"",
+"srcdir":"$CUBRID/conf",
+"destdir":"$CUBRID/tmp/warn_deep_dir_01/warn_deep_dir_02/warn_deep_dir_03/warn_deep_dir_04/warn_deep_dir_05/warn_deep_dir_06/warn_deep_dir_07/warn_deep_dir_08/warn_deep_dir_09/warn_deep_dir_10/warn_deep_dir_11/warn_deep_dir_12/warn_deep_dir_13/warn_deep_dir_14/warn_deep_dir_15/warn_deep_dir_16/warn_deep_dir_17/warn_deep_dir_18/warn_deep_dir_19/warn_deep_dir_20/warn_deep_dir_21/warn_deep_dir_22/warn_deep_dir_23/warn_deep_dir_24/warn_deep_dir_25/warn_deep_dir_26/warn_deep_dir_27/warn_deep_dir_28/warn_deep_dir_29/warn_deep_dir_30/warn_deep_dir_31/warn_deep_dir_32/warn_deep_dir_33/warn_deep_dir_34/warn_deep_dir_35/warn_deep_dir_36/warn_deep_dir_37/warn_deep_dir_38/warn_deep_dir_39/warn_deep_dir_40"}

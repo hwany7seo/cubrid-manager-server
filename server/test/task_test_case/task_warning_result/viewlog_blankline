@@ -1,0 +1,5 @@
+{"task":"viewlog",
+"token":"",
+"path":"$CUBRID/conf/cubrid.conf",
+"start":"1",
+"end":"200"}

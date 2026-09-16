@@ -1,0 +1,102 @@
+// CUBRID Manager Server -- compiler warning fix set.
+//
+// Every case here goes through code that the warning cleanup touched. The set is
+// deliberately cheap and non-destructive: it creates no database, only one CM user
+// and one directory tree under $CUBRID/tmp, and removes both before it ends.
+//
+// How to use it (see warning_test.md for the full write-up):
+//
+//   # 1. record what the *unfixed* build does
+//   ./run_tests.sh -a  11.5 task_warning_result.txt
+//   # 2. rebuild with the fix, then compare
+//   ./run_tests.sh -fc 11.5 task_warning_result.txt
+//
+// Only "getcmsenv" is expected to differ between the two builds if the MD5 hex
+// assembly in _hash_cert() were broken. Everything else must come back byte for
+// byte identical: the point of the set is that widening buffers, changing loop
+// variables to size_t and replacing strncpy/strncat did not move any behaviour.
+
+// ---- 1. session.
+//
+// "login" and "getenv" are deliberately absent from this list: init_env() reads
+// those two case files itself and holds the token they produce. Listing "login"
+// would log the same account in a second time, which replaces that token and
+// leaves every request after it rejected. A *failed* login drops the account's
+// token as well, which is why the wrong-password cases further down use the
+// throwaway user and never admin.
+//
+// The login init_env() performs is itself part of the coverage: it decrypts the
+// shipped 32-hex admin ciphertext, the short-input path of uDecrypt()
+// (warning.md 3.3). "keepalive" is the lightest authenticated request there is,
+// so it exercises the token record (warning.md 2.4) and nothing else.
+keepalive
+
+// ---- 2. _hash_cert(): the MD5 hex string is now built with a moving pointer
+// instead of snprintf+strncat into a MD5_DIGEST_LENGTH buffer. getcmsenv answers
+// "is_default_cert": "yes" only when the digest matches CMS_DEFAULT_CERT_MD5, so a
+// broken assembly flips the field.
+getcmsenv
+
+// ---- 3. uEncrypt() / uDecrypt() round trip (warning.md 3.3, 3.8).
+// A one character password leaves 31 bytes of the encryption buffer to the padding
+// that used to be uninitialised heap; a 32 character one (PASSWD_LENGTH) leaves
+// none. Both have to survive a store-and-verify cycle, and the wrong password has
+// to keep being rejected.
+adddbmtuser_shortpw
+login_shortpw,success
+login_shortpw_wrongpw,failure
+setdbmtpasswd_maxpw
+login_maxpw,success
+login_oldpw,failure
+deletedbmtuser_warnuser
+login_deleted,failure
+
+// ---- 4. uRemoveCRLF() (warning.md 3.1). Each of these reads a file line by line
+// and trims it; cubrid.conf and the broker conf both contain blank lines, which is
+// the input that used to index str[(size_t) -1].
+viewlog_blankline
+getallsysparam_cubridconf
+getaddbrokerinfo
+unloadinfo
+
+// ---- 5. buffers that hold a path composed from another path (warning.md 2.2) and
+// the size_t loop variables in SpaceDbResult (warning.md 2.5).
+getlogfileinfo
+getloginfo,success
+getdbsize
+dbspaceinfo
+backupdbinfo
+paramdump
+paramdump_nodbname,failure
+
+// ---- 6. folder_copy() and ts_list_dir(). copyfolder builds a directory ~700
+// characters deep and fills it, list_dir then walks it: that is the composition
+// ts_list_dir does into name_temp (warning.md 3.7). The rejected cases keep the
+// path checks honest - they must still be refused after full_path was widened.
+list_dir_conf
+copyfolder_deep
+list_dir_deep
+deletefolder_deep
+list_dir_traversal,failure
+viewlog_outside,failure
+
+// ---- 7. cm_mon_stat.cpp: "new (int[n])" became "new int[n]" in the eight
+// samplers this task reads (warning.md 2.6). The sample count grows with the
+// server's uptime, so this one can only be judged by status.
+get_mon_statistic,success
+
+// ---- 8. ts_start_statdump(): its argv[] is now "const char *argv[10]" like every
+// other command builder in the file. start must stay right before stop.
+start_statdump
+sleep 10
+stop_statdump
+sleep 10
+
+// ---- 9. _run_child() -> read_stdout_stderr_as_err() (warning.md 3.4) and
+// get_sql_text() / get_next_sqltext(), where a strncpy that copied exactly
+// strlen(src) bytes became snprintf, and a block copy became memcpy (warning.md
+// 2.4). Both answers carry live lock/transaction state, so status only.
+lockdb,success
+gettransactioninfo,success
+
+logout

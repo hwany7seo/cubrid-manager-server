@@ -1,0 +1,7 @@
+{"task":"adddbmtuser",
+"token":"",
+"targetid":"warnuser",
+"password":"a",
+"casauth":"admin",
+"dbcreate":"none",
+"statusmonitorauth":"admin"}
