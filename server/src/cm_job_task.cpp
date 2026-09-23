@@ -74,7 +74,6 @@
 #include "openssl/pem.h"
 #include "openssl/conf.h"
 #include "openssl/x509v3.h"
-#include "openssl/md5.h"
 
 #include <list>
 #include <string>
@@ -346,7 +345,10 @@ static void _add_issuer_info (X509_NAME *name, const char *item_name,
 static EVP_PKEY *_generate_rsa_key (int bits, char *_dbmt_error);
 static int _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp,
 		       int bits, char *_dbmt_error);
-static int _hash_cert (char *hash_value, char *file_path);
+/* hex string of a SHA-256 digest, plus the terminator */
+#define CMS_CERT_HASH_STRING_SIZE 65
+
+static int _hash_cert (char *hash_value, size_t hash_value_size, char *file_path);
 static int _is_default_cert (char *_dbmt_error);
 static int _is_exist_default_backup_cert (char *_dbmt_error);
 static int _backup_cert (char *_dbmt_error);
@@ -11843,19 +11845,18 @@ ts_get_cms_env (nvplist *req, nvplist *res, char *_dbmt_error)
 
   nv_add_nvp_int (res, "cm_port", sco.iCMS_port);
 
+  /* A certificate that cannot be read or hashed is certainly not the one we
+   * ship, and it is no reason to fail the whole environment query.
+   */
   is_default_cert_file = _is_default_cert (_dbmt_error);
   if (is_default_cert_file < 0)
     {
-      return ERR_WITH_MSG;
+      LOG_WARN ("ts_get_cms_env: %s", _dbmt_error);
+      _dbmt_error[0] = '\0';
     }
-  if (is_default_cert_file == 0)
-    {
-      nv_add_nvp (res, "is_default_cert", "no");
-    }
-  else
-    {
-      nv_add_nvp (res, "is_default_cert", "yes");
-    }
+
+  nv_add_nvp (res, "is_default_cert",
+	      (is_default_cert_file == 1) ? "yes" : "no");
 
   return ERR_NO_ERROR;
 }
@@ -16612,16 +16613,21 @@ find_statdumpd_info (char *dbname)
 
 
 static int
-_hash_cert (char *hash_value, char *file_path)
+_hash_cert (char *hash_value, size_t hash_value_size, char *file_path)
 {
   EVP_MD_CTX *mdContext = NULL;
   unsigned char data[1024];	/* file read buffer */
-  unsigned char md5_final[EVP_MAX_MD_SIZE];
+  unsigned char hash_final[EVP_MAX_MD_SIZE];
   char *hash_p = NULL;
-  unsigned int md5_len = 0;
+  unsigned int hash_len = 0;
   int bytes = 0;
   unsigned int i = 0;
   FILE *inFile = NULL;
+
+  if (hash_value_size < CMS_CERT_HASH_STRING_SIZE)
+    {
+      return 1;
+    }
 
   if ((inFile = fopen (file_path, "rb")) == NULL)
     {
@@ -16634,7 +16640,7 @@ _hash_cert (char *hash_value, char *file_path)
       return 1;
     }
 
-  if (EVP_DigestInit_ex (mdContext, EVP_md5 (), NULL) != 1)
+  if (EVP_DigestInit_ex (mdContext, EVP_sha256 (), NULL) != 1)
     {
       EVP_MD_CTX_free (mdContext);
       fclose (inFile);
@@ -16651,7 +16657,7 @@ _hash_cert (char *hash_value, char *file_path)
 	}
     }
 
-  if (EVP_DigestFinal_ex (mdContext, md5_final, &md5_len) != 1)
+  if (EVP_DigestFinal_ex (mdContext, hash_final, &hash_len) != 1)
     {
       EVP_MD_CTX_free (mdContext);
       fclose (inFile);
@@ -16662,23 +16668,27 @@ _hash_cert (char *hash_value, char *file_path)
   fclose (inFile);
 
   hash_p = hash_value + strlen (hash_value);
-  for (i = 0; i < md5_len; i++)
+  for (i = 0; i < hash_len; i++)
     {
-      snprintf (hash_p, 3, "%02x", md5_final[i]);
+      snprintf (hash_p, 3, "%02x", hash_final[i]);
       hash_p += 2;
     }
   return 0;
 }
 
-#ifndef CMS_DEFAULT_CERT_MD5
-#define CMS_DEFAULT_CERT_MD5 "4b0f669d5001f0cb4aca77ec71f4e2e2"
+/* SHA-256 of cmserver/conf/cm_ssl_cert_2048.crt. The cmake build passes the
+ * hash of the certificate it actually installs; this is the fallback for the
+ * builds that do not.
+ */
+#ifndef CMS_DEFAULT_CERT_HASH
+#define CMS_DEFAULT_CERT_HASH "6bc5b8ffe78e790e71595e435dae7c63b05bad4650308ce9c7bae2cf870d83a8"
 #endif
-static const char *default_hash_file = CMS_DEFAULT_CERT_MD5;
+static const char *default_hash_file = CMS_DEFAULT_CERT_HASH;
 
 static int
 _is_default_cert (char *_dbmt_error)
 {
-  char new_hash_value[33];
+  char new_hash_value[CMS_CERT_HASH_STRING_SIZE];
   char default_cert_path[PATH_MAX];
   int compare_ret = 0;
 
@@ -16687,7 +16697,7 @@ _is_default_cert (char *_dbmt_error)
 
   snprintf (default_cert_path, PATH_MAX, "%s", sco.szSSLCertificate);
 
-  if (_hash_cert (new_hash_value, default_cert_path) != 0)
+  if (_hash_cert (new_hash_value, sizeof (new_hash_value), default_cert_path) != 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Fail to get the value of SSL certification file.");
@@ -16706,7 +16716,7 @@ _is_default_cert (char *_dbmt_error)
 static int
 _is_exist_default_backup_cert (char *_dbmt_error)
 {
-  char new_hash_value[33];
+  char new_hash_value[CMS_CERT_HASH_STRING_SIZE];
   char default_backup_cert_path[COMPOSED_PATH_MAX];
   int compare_ret = 0;
 
@@ -16724,7 +16734,7 @@ _is_exist_default_backup_cert (char *_dbmt_error)
       return -1;
     }
 
-  if (_hash_cert (new_hash_value, default_backup_cert_path) != 0)
+  if (_hash_cert (new_hash_value, sizeof (new_hash_value), default_backup_cert_path) != 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Fail to get the value of backup SSL certification file.");

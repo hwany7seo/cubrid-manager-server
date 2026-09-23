@@ -246,11 +246,11 @@ install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_1024.key
   DESTINATION ${CMS_CONFDIR} COMPONENT Manager)
 
-file(MD5 ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_${CMS_SSL_RSA_BITS}.crt
-     CMS_DEFAULT_CERT_MD5)
-message(STATUS "Default certificate MD5 (RSA ${CMS_SSL_RSA_BITS}): ${CMS_DEFAULT_CERT_MD5}")
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_${CMS_SSL_RSA_BITS}.crt
+     CMS_DEFAULT_CERT_HASH)
+message(STATUS "Default certificate SHA-256 (RSA ${CMS_SSL_RSA_BITS}): ${CMS_DEFAULT_CERT_HASH}")
 target_compile_definitions(cub_manager PRIVATE
-  CMS_DEFAULT_CERT_MD5="${CMS_DEFAULT_CERT_MD5}")
+  CMS_DEFAULT_CERT_HASH="${CMS_DEFAULT_CERT_HASH}")
 
 # cm_ssl_cert.{crt,key} is the name the manager opens; keep it a link to the sized pair
 # the way the automake build did.
