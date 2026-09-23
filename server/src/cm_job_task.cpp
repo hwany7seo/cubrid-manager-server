@@ -75,9 +75,6 @@
 #include "openssl/conf.h"
 #include "openssl/x509v3.h"
 #include "openssl/md5.h"
-#ifndef OPENSSL_NO_ENGINE
-#include "openssl/engine.h"
-#endif
 
 #include <list>
 #include <string>
@@ -346,6 +343,7 @@ static int _verify_user_passwd (char *dbname, char *dbuser, char *dbpasswd,
 static int _add_extensions (X509 *cert, int nid, char *value);
 static void _add_issuer_info (X509_NAME *name, const char *item_name,
 			      char *item_value);
+static EVP_PKEY *_generate_rsa_key (int bits, char *_dbmt_error);
 static int _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp,
 		       int bits, char *_dbmt_error);
 static int _hash_cert (char *hash_value, char *file_path);
@@ -15973,6 +15971,90 @@ ts_monitor_process (nvplist *req, nvplist *res, char *_dbmt_error)
   return ERR_NO_ERROR;
 }
 
+/*
+ * _generate_rsa_key - create an RSA key pair of 'bits' bits.
+ *
+ * OpenSSL 3.0 deprecated the whole RSA_* interface in favour of EVP_RSA_gen(),
+ * which is not available before 3.0, so keep the legacy path for the older
+ * libraries the non-cmake builds still link against.
+ */
+static EVP_PKEY *
+_generate_rsa_key (int bits, char *_dbmt_error)
+{
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+  EVP_PKEY *pub_key = EVP_RSA_gen (bits);
+
+  if (pub_key == NULL)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new SSL private key file.");
+    }
+
+  return pub_key;
+#else
+  EVP_PKEY *pub_key = NULL;
+  RSA *rsa = NULL;
+  BIGNUM *bignum = NULL;
+
+  if ((pub_key = EVP_PKEY_new ()) == NULL)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new private key.");
+      goto error;
+    }
+  if ((bignum = BN_new ()) == NULL)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new SSL private key file - create bignum failed.");
+      goto error;
+    }
+  if (BN_set_word (bignum, RSA_F4) == 0)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new SSL private key file - set bignum failed.");
+      goto error;
+    }
+  if ((rsa = RSA_new ()) == NULL)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new SSL private key file - create RSA failed.");
+      goto error;
+    }
+  if (RSA_generate_key_ex (rsa, bits, bignum, NULL) == 0)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Cannot make a new SSL private key file.");
+      goto error;
+    }
+  if (EVP_PKEY_assign_RSA (pub_key, rsa) == 0)
+    {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
+		"Failed to generate public key.");
+      goto error;
+    }
+  /* pub_key owns rsa now. */
+  rsa = NULL;
+
+  BN_free (bignum);
+  return pub_key;
+
+error:
+  if (rsa != NULL)
+    {
+      RSA_free (rsa);
+    }
+  if (bignum != NULL)
+    {
+      BN_free (bignum);
+    }
+  if (pub_key != NULL)
+    {
+      EVP_PKEY_free (pub_key);
+    }
+  return NULL;
+#endif
+}
+
 static int
 _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 	    char *_dbmt_error)
@@ -15986,9 +16068,7 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 
   X509 *x509_local = NULL;
   EVP_PKEY *pub_key = NULL;
-  RSA *rsa = NULL;
   X509_NAME *name = NULL;
-  BIGNUM *bignum = NULL;
   bool pub_key_created = false;
   bool x509_created = false;
   int ret_val = ERR_NO_ERROR;
@@ -16028,10 +16108,8 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 
   if ((pkeyp == NULL) || (*pkeyp == NULL))
     {
-      if ((pub_key = EVP_PKEY_new ()) == NULL)
+      if ((pub_key = _generate_rsa_key (bits, _dbmt_error)) == NULL)
 	{
-	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		    "Cannot make a new private key.");
 	  ret_val = ERR_WITH_MSG;
 	  goto error;
 	}
@@ -16057,46 +16135,6 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
     {
       x509_local = *x509p;
     }
-
-  /* Generate RSA key using RSA_generate_key_ex to replace RSA_generate_key
-  *
-  */
-  if ((bignum = BN_new ()) == NULL)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		"Cannot make a new SSL private key file - create bignum failed.");
-      ret_val = ERR_WITH_MSG;
-      goto error;
-    }
-  if (BN_set_word (bignum, RSA_F4) == 0)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		"Cannot make a new SSL private key file - set bignum failed.");
-      ret_val = ERR_WITH_MSG;
-      goto error;
-    }
-  if ((rsa = RSA_new ()) == NULL)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		"Cannot make a new SSL private key file - create RSA failed.");
-      ret_val = ERR_WITH_MSG;
-      goto error;
-    }
-  if (RSA_generate_key_ex (rsa, bits, bignum, NULL) == 0)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		"Cannot make a new SSL private key file.");
-      ret_val = ERR_WITH_MSG;
-      goto error;
-    }
-  if (EVP_PKEY_assign_RSA (pub_key, rsa) == 0)
-    {
-      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
-		"Failed to generate public key.");
-      ret_val = ERR_WITH_MSG;
-      goto error;
-    }
-  rsa = NULL;
 
   X509_set_version (x509_local, 2);
   ASN1_INTEGER_set (X509_get_serialNumber (x509_local), 0);
@@ -16199,19 +16237,9 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 
   *x509p = x509_local;
   *pkeyp = pub_key;
-
-  BN_free (bignum);
   return ERR_NO_ERROR;
 
 error:
-  if (rsa != NULL)
-    {
-      RSA_free (rsa);
-    }
-  if (bignum != NULL)
-    {
-      BN_free (bignum);
-    }
   if (x509_created)
     {
       X509_free (x509_local);
@@ -16406,10 +16434,6 @@ release_src:
       EVP_PKEY_free (pub_key);
     }
 
-#ifndef OPENSSL_NO_ENGINE
-  ENGINE_cleanup ();
-#endif
-  CRYPTO_cleanup_all_ex_data ();
   if (bio_err != NULL)
     {
       BIO_free (bio_err);

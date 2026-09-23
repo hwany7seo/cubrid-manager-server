@@ -311,8 +311,11 @@ SSL_CTX *init_SSL (const char *certificate_chain,const char *private_key)
 {
 
   SSL_CTX *ctx = NULL;
-  /* init SSL libray is must. */
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+  /* 1.1.0 and later initialize the library on first use. */
   SSL_library_init ();
+#endif
 
   /* Currently, we support upto TLS_v1.2 */
 #if !defined (WINDOWS)
