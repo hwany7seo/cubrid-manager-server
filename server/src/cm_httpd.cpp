@@ -502,6 +502,13 @@ start_service ()
   thread_setup_SSL ();
 
   SSL_CTX *ctx = init_SSL (sco.szSSLCertificate, sco.szSSLKey);
+  if (ctx == NULL)
+    {
+      snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE,
+		"CUBRID Manager Server : Failed to initialize the SSL context.\n");
+      ut_record_cubrid_utility_log_stderr (tmpstrbuf);
+      return -1;
+    }
 
   nfd = bind_socket (sco.iCMS_port);
 
