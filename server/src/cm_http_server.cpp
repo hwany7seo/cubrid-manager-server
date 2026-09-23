@@ -35,15 +35,21 @@ using namespace std;
 static void http_error_404 (struct evhttp_request *req, int fd);
 static void server_setup_certs (SSL_CTX *ctx, const char *certificate_chain,const char *private_key);
 static void web_error_404 (struct evhttp_request *req);
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static void locking_callback (int mode, int type, const char *file, int line);
 
 #if !defined(WINDOWS) && !defined(__BEOS__)
 static void thread_id_callback (CRYPTO_THREADID *tid);
 #endif
+#endif
 
 static char uri_root[512] = "/";
 static char *userAgent   = NULL;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static MUTEX_T *lock_array = NULL;
+#endif
 
 /*
  * This struct is used to get type of the files to browser.
@@ -205,15 +211,24 @@ static void server_setup_certs (SSL_CTX *ctx,
  * @brief thread_setup_SSL
  * Setup the necessary resources to ensure that OpenSSL can safely
  * be used in multi-threaded environment.
+ * OpenSSL 1.1.0 and later lock themselves, and turned CRYPTO_num_locks()
+ * and the callback setters into no-ops, so this is only built for the
+ * older libraries.
  * @return
  */
 void thread_setup_SSL (void)
 {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
   int total_locks, i;
 
   total_locks = CRYPTO_num_locks ();
 
   lock_array = (MUTEX_T *) OPENSSL_malloc (total_locks * sizeof (MUTEX_T));
+  if (lock_array == NULL)
+    {
+      LOG_ERROR ("-- Web server: Fail to allocate the OpenSSL lock array.");
+      exit (-1);
+    }
 
   for (i = 0; i < total_locks; i++)
     {
@@ -230,8 +245,10 @@ void thread_setup_SSL (void)
 #endif
 
   CRYPTO_set_locking_callback (locking_callback);
+#endif
 }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 #if !defined(WINDOWS) && !defined(__BEOS__)
 /**
  * @brief thread_id_callback
@@ -270,6 +287,7 @@ static void locking_callback (int mode, int type, const char *file, int line)
       MUTEX_UNLOCK (lock_array[type]);
     }
 }
+#endif /* OPENSSL_VERSION_NUMBER < 0x10100000L */
 
 /**
  * @brief thread_cleanup_SSL
@@ -278,6 +296,7 @@ static void locking_callback (int mode, int type, const char *file, int line)
  */
 void thread_cleanup_SSL (void)
 {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
   int total_locks, i;
 
   CRYPTO_set_locking_callback (NULL);
@@ -294,6 +313,7 @@ void thread_cleanup_SSL (void)
       OPENSSL_free (lock_array);
       lock_array = NULL;
     }
+#endif
 }
 
 /**
