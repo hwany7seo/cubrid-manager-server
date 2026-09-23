@@ -15989,6 +15989,9 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
   RSA *rsa = NULL;
   X509_NAME *name = NULL;
   BIGNUM *bignum = NULL;
+  bool pub_key_created = false;
+  bool x509_created = false;
+  int ret_val = ERR_NO_ERROR;
 
   char *country_name = NULL;
   char *state_name = NULL;
@@ -16029,8 +16032,10 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 	{
 	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		    "Cannot make a new private key.");
-	  return ERR_WITH_MSG;
+	  ret_val = ERR_WITH_MSG;
+	  goto error;
 	}
+      pub_key_created = true;
     }
   else
     {
@@ -16043,8 +16048,10 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
 	{
 	  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		    "Cannot make a new certification file.");
-	  return ERR_WITH_MSG;
+	  ret_val = ERR_WITH_MSG;
+	  goto error;
 	}
+      x509_created = true;
     }
   else
     {
@@ -16058,31 +16065,36 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot make a new SSL private key file - create bignum failed.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
   if (BN_set_word (bignum, RSA_F4) == 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot make a new SSL private key file - set bignum failed.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
   if ((rsa = RSA_new ()) == NULL)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot make a new SSL private key file - create RSA failed.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
   if (RSA_generate_key_ex (rsa, bits, bignum, NULL) == 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot make a new SSL private key file.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
   if (EVP_PKEY_assign_RSA (pub_key, rsa) == 0)
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Failed to generate public key.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
   rsa = NULL;
 
@@ -16181,12 +16193,34 @@ _make_cert (nvplist *req, X509 **x509p, EVP_PKEY **pkeyp, int bits,
     {
       snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE,
 		"Cannot sign with public key.");
-      return ERR_WITH_MSG;
+      ret_val = ERR_WITH_MSG;
+      goto error;
     }
 
   *x509p = x509_local;
   *pkeyp = pub_key;
+
+  BN_free (bignum);
   return ERR_NO_ERROR;
+
+error:
+  if (rsa != NULL)
+    {
+      RSA_free (rsa);
+    }
+  if (bignum != NULL)
+    {
+      BN_free (bignum);
+    }
+  if (x509_created)
+    {
+      X509_free (x509_local);
+    }
+  if (pub_key_created)
+    {
+      EVP_PKEY_free (pub_key);
+    }
+  return ret_val;
 }
 
 static void
@@ -16376,7 +16410,7 @@ release_src:
   ENGINE_cleanup ();
 #endif
   CRYPTO_cleanup_all_ex_data ();
-  if (pub_key != NULL)
+  if (bio_err != NULL)
     {
       BIO_free (bio_err);
     }
