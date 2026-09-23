@@ -337,11 +337,13 @@ SSL_CTX *init_SSL (const char *certificate_chain,const char *private_key)
   SSL_library_init ();
 #endif
 
-  /* Currently, we support upto TLS_v1.2 */
-#if !defined (WINDOWS)
+  /* The version-flexible method negotiates the highest protocol both ends
+   * support. The floor is TLS 1.2, set below.
+   */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   ctx = SSL_CTX_new (TLS_server_method ());
 #else
-  ctx = SSL_CTX_new (TLSv1_server_method ());
+  ctx = SSL_CTX_new (SSLv23_server_method ());
 #endif
 
   if (!ctx)
@@ -355,6 +357,17 @@ SSL_CTX *init_SSL (const char *certificate_chain,const char *private_key)
 		       SSL_OP_SINGLE_ECDH_USE |
 		       SSL_OP_NO_SSLv3 |
 		       SSL_OP_NO_SSLv2);
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  if (SSL_CTX_set_min_proto_version (ctx, TLS1_2_VERSION) != 1)
+    {
+      LOG_ERROR ("-- Web server: Fail to set the minimum TLS version.");
+      SSL_CTX_free (ctx);
+      return NULL;
+    }
+#else
+  SSL_CTX_set_options (ctx, SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+#endif
 
   /* Find and set up our server certificate. */
   server_setup_certs (ctx, certificate_chain, private_key);
