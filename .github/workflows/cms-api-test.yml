@@ -11,6 +11,11 @@ name: CMS API test
 # branch as an input, and a bare version there means the release branch of
 # that version: 11.4 is read as release/11.4.
 #
+# The suite is told the version of the engine it runs against, which picks the
+# per version request files under <set>/2_change_case/<version>/. It is read
+# from the engine's VERSION file unless a manual run names one; a version the
+# suite does not know is not passed, and the suite runs with its default.
+#
 
 on:
   pull_request:
@@ -24,6 +29,10 @@ on:
       engine_ref:
         description: 'engine branch or tag, or a version like 11.4 for release/11.4'
         default: develop
+        required: false
+      test_version:
+        description: 'CUBRID version the suite runs as, like 10.2; empty reads it from the engine'
+        default: ''
         required: false
 
 concurrency:
@@ -157,11 +166,28 @@ jobs:
       - name: Read the engine version
         id: version
         working-directory: cubrid
+        env:
+          TEST_VERSION_INPUT: ${{ github.event.inputs.test_version }}
         run: |
           set -euo pipefail
           full=$(tr -d '[:space:]' < VERSION)
           echo "full=$full" >> "$GITHUB_OUTPUT"
           echo "engine VERSION=$full"
+
+          # 10.2.17.xxxx -> 10.2, unless the manual run named a version.
+          wanted="${TEST_VERSION_INPUT:-}"
+          [ -n "$wanted" ] || wanted=$(echo "$full" | cut -d. -f1,2)
+          known=$(grep -E '^KNOWN_VERSIONS *=' cubridmanager/server/test/test_tasks.py \
+            | grep -oE '[0-9]+_[0-9]+' | tr '_' '.')
+          if echo "$known" | grep -qxF "$wanted"; then
+            test_version="$wanted"
+            echo "test version: $test_version"
+          else
+            test_version=""
+            echo "test version $wanted is not one the suite knows" \
+              "($(echo $known)); running with its default"
+          fi
+          echo "test=$test_version" >> "$GITHUB_OUTPUT"
 
       # CUBRID is meant to be run by its own unprivileged owner, and a
       # container job is root, so everything from here runs as cubrid.
@@ -296,13 +322,15 @@ jobs:
           export PYTHONUNBUFFERED=1
           cd "$WORKSPACE/cubrid/cubridmanager/server/test"
           timeout --signal=INT --kill-after=1m 50m \
-            ./run_tests.sh -ns "$TEST_SET" </dev/null 2>&1 | tee run.log
+            ./run_tests.sh -ns ${TEST_VERSION:+"$TEST_VERSION"} "$TEST_SET" \
+            </dev/null 2>&1 | tee run.log
           exit ${PIPESTATUS[0]}
           EOS
           chmod 0755 /tmp/test-as-cubrid.sh
           status=0
           runuser -u cubrid -- env HOME=/home/cubrid PATH="$PATH" \
             WORKSPACE="$GITHUB_WORKSPACE" TEST_SET="$TEST_SET" \
+            TEST_VERSION='${{ steps.version.outputs.test }}' \
             bash /tmp/test-as-cubrid.sh || status=$?
           if [ $status -eq 124 ] || [ $status -eq 137 ]; then
             echo "the suite did not finish in time; the last case in run.log"
@@ -342,6 +370,7 @@ jobs:
             echo "| engine | \`${ENGINE_REPO}@${ENGINE_REF}\` (VERSION ${{ steps.version.outputs.full }}) |"
             echo "| built on | Rocky Linux 8.10, gcc $(gcc -dumpversion) |"
             echo "| test set | \`$TEST_SET\` |"
+            echo "| test version | ${{ steps.version.outputs.test || '(suite default)' }} |"
             echo
             tail -n 3 run.log | grep -E 'succeeded|failed' || true
             echo

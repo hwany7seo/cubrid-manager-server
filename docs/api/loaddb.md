@@ -20,8 +20,8 @@ The loaddb interface will load a database from files.
 | index | index file path |
 | errorcontrolfile | FILE to control error(s) during loading |
 | ignoreclassfile | input file of class names that skip load |
-| no-user-specified-name | Find classes, serials, and triggers by their object names without their owner names |
-| schema-file-list | name of schema-file-list, list of schema file names to be used in loaddb |
+| no-user-specified-name | Find classes, serials, and triggers by their object names without their owner names (only support Server 11.2 or higher)|
+| schema-file-list | name of schema-file-list, list of schema file names to be used in loaddb (only support Server 11.3 or higher)|
 | delete_orignal_files | delete original file after load |
 | statisticsuse | y or n, update the statistics after the load |
 | trigger | the full path of the trigger file to be loaded |

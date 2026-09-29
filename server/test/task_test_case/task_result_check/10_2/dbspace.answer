@@ -1,0 +1,102 @@
+{
+   "demodb": [
+      {
+         "dbinfo": [
+            {
+               "free_size": "<volatile>",
+               "purpose": "PERMANENT",
+               "total_size": "8192",
+               "type": "PERMANENT",
+               "used_size": "4864",
+               "volume_count": "1"
+            },
+            {
+               "free_size": "<volatile>",
+               "purpose": "TEMPORARY",
+               "total_size": "0",
+               "type": "PERMANENT",
+               "used_size": "0",
+               "volume_count": "0"
+            },
+            {
+               "free_size": "<volatile>",
+               "purpose": "TEMPORARY",
+               "total_size": "0",
+               "type": "TEMPORARY",
+               "used_size": "0",
+               "volume_count": "0"
+            }
+         ],
+         "dbname": "demodb",
+         "fileinfo": [
+            {
+               "data_type": "INDEX",
+               "file_count": "30",
+               "file_table_size": "30",
+               "reserved_size": "1739",
+               "total_size": "1920",
+               "used_size": "151"
+            },
+            {
+               "data_type": "HEAP",
+               "file_count": "37",
+               "file_table_size": "37",
+               "reserved_size": "2219",
+               "total_size": "2368",
+               "used_size": "112"
+            },
+            {
+               "data_type": "SYSTEM",
+               "file_count": "8",
+               "file_table_size": "8",
+               "reserved_size": "481",
+               "total_size": "512",
+               "used_size": "23"
+            },
+            {
+               "data_type": "TEMP",
+               "file_count": "0",
+               "file_table_size": "0",
+               "reserved_size": "0",
+               "total_size": "0",
+               "used_size": "0"
+            }
+         ],
+         "freespace": "<volatile>",
+         "logpagesize": "16384",
+         "pagesize": "16384",
+         "spaceinfo": [
+            {
+               "date": "20260930",
+               "freepage": "3328",
+               "location": "$CUBRID_DATABASES/demodb/demodb",
+               "purpose": "PERMANENT",
+               "spacename": "$CUBRID_DATABASES/demodb/demodb",
+               "totalpage": "8192",
+               "type": "PERMANENT",
+               "usedpage": "4864",
+               "volid": "0"
+            },
+            {
+               "date": "20260930",
+               "freepage": " ",
+               "location": "$CUBRID_DATABASES/demodb",
+               "spacename": "demodb_lgat",
+               "totalpage": "6400",
+               "type": "Active_log"
+            },
+            {
+               "date": "20260930",
+               "freepage": " ",
+               "location": "$CUBRID_DATABASES/demodb",
+               "spacename": "demodb_lgar_t",
+               "totalpage": "6400",
+               "type": "Archive_log"
+            }
+         ]
+      }
+   ],
+   "note": "none",
+   "status": "success",
+   "task": "dbspace"
+}

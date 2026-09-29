@@ -9,6 +9,8 @@ The gettransactioninfo interface fetches database transaction information.
 | task | task name |
 | token | token string encrypted. |
 | dbname | database name |
+| dbuser | database user (Only version 11 (or lower) is required; no other versions are needed.)|
+| dbpasswd | user password (Only version 11 (or lower) is required; no other versions are needed.)|
 
 ## Request Sample
 

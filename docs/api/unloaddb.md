@@ -17,9 +17,9 @@ The unloaddb interface will unload a database server.
 | classname | unload class name |
 | ref | include referenced tables; |
 | classonly | include specified class only |
-| as-dba | extract the same schema file as the DBA |
-| skip-index-detail | skip with option of indexes |
-| split-schema-files | split schema information by object |
+| as-dba | extract the same schema file as the DBA (only support Server 11.3 or higher)|
+| skip-index-detail | skip with option of indexes (only support Server 11.3 or higher)|
+| split-schema-files | split schema information by object (only support Server 11.3 or higher)|
 | delimit | use '"' where an identifier begins and ends; default: don't use |
 | estimate | estimated NUMBER of instances; default: auto computed |
 | prefix | PREFIX for output files; default: the database name |

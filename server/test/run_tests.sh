@@ -14,11 +14,15 @@
 # the directory they live in; without one, 11.4 is used.
 #   ./run_tests.sh -a  11.4 task_result_check.txt
 #   ./run_tests.sh -fc 11.4 task_result_check.txt
+# The version also picks the request files: a case with a copy under
+# <set>/2_change_case/<version>/ sends that one instead.
+#   ./run_tests.sh 10.2 task_result_check.txt
 #   ./run_tests.sh --all                        run every set in task_test_case/
 #   ./run_tests.sh --clean                      drop log/ and the .result files
 #
 # Anything else is passed through to test_tasks.py, so --dump works too:
 #   ./run_tests.sh --dump getbrokersinfo checkfile
+#   ./run_tests.sh --dump 10.2 gettransactioninfo
 
 set -u
 
@@ -29,7 +33,7 @@ CASE_ROOT=task_test_case
 LOG_DIR=log
 
 usage() {
-    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 clean() {

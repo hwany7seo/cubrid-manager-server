@@ -1,0 +1,10 @@
+{
+   "CMS_VER": "11.4.0.0080",
+   "CUBRIDVER": "CUBRID 10.2 (10.2.19.9024-01b54fa) (64bit release build for Linux) (Sep 29 2026 08:42:42)",
+   "PLATFORM": "x64",
+   "cm_port": "8001",
+   "is_default_cert": "no",
+   "note": "none",
+   "status": "success",
+   "task": "getversion"
+}

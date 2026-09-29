@@ -22,6 +22,8 @@ TEST_CONFIG_DIR = "task_test_config/"
 
 KNOWN_VERSIONS = ("10_2", "11_0", "11_2", "11_3", "11_4", "11_5")
 DEFAULT_VERSION = "11_4"
+# Per version request overrides, see case_path().
+CHANGE_CASE_DIR = "2_change_case"
 # Where start_kill_targets() records the processes it spawned, so that a run
 # killed before clean_env() can be cleaned up by the next one.
 HELPER_PID_FILE = "log/helper_pids"
@@ -58,7 +60,21 @@ def resolve_test_set(listarg):
     return listpath, os.path.join(os.path.dirname(listpath), base), base
 
 
+def override_dir():
+    """Where the requests that differ on this version live, if any do."""
+    return os.path.join(CASE_DIR, CHANGE_CASE_DIR, VERSION)
+
+
 def case_path(name):
+    """Request file of a case: the one for this version if there is one.
+
+    Older engines take a few requests in another form. Those cases keep a copy
+    under <set>/2_change_case/<version>/, and every other case falls back to
+    the file of the set.
+    """
+    override = os.path.join(override_dir(), name)
+    if os.path.isfile(override):
+        return override
     return os.path.join(CASE_DIR, name)
 
 
@@ -632,7 +648,7 @@ def find_tranindex(pid, timeout=15):
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        data = probe({"task": "gettransactioninfo", "dbname": "demodb"})
+        data = probe({"task": "gettransactioninfo", "dbname": "demodb", "dbuser": "dba", "dbpasswd": ""})
         for entry in data.get("transactioninfo", []):
             for tran in entry.get("transaction", []):
                 if tran.get("pid") == str(pid):
@@ -886,14 +902,14 @@ def xml_escape(text):
 def detail_xml_path(path):
     """`log/result.xml` -> `log/result_detail.xml`."""
     root, ext = os.path.splitext(path)
-    return root + "_detail" + ext
+    return root + "_detail_" + ext
 
 
 def write_junit_xml(path, with_response=False):
     """Write the report the CI job collects.
 
     Two files are produced: the plain one stays small enough to skim, and the
-    "_detail" one carries the full response of every case in <system-out>, so
+    "_detail_" + VERSION + ext one carries the full response of every case in <system-out>, so
     that the documented samples in docs/api/*.md can be checked against what
     the server really answers without re-running anything.
     """
@@ -959,6 +975,55 @@ def reset_mon_data(cubrid_home):
             os.remove(os.path.join(mon_dir, name))
         except OSError:
             pass
+
+
+# cm.conf as it was before enable_mon_statistic() changed it, so that
+# stop_services() can put it back.
+cm_conf_saved = None
+
+
+def enable_mon_statistic(cubrid_home):
+    """Turn on support_mon_statistic in cm.conf before cub_manager starts.
+
+    The cm.conf a fresh install ships has it off, and with it off the
+    monitoring gather never runs: wait_for_mon_data() then waits in vain and
+    set_mon_interval and get_mon_statistic fail. cub_manager only reads the
+    file when it starts, so it is changed while the service is down.
+    """
+    global cm_conf_saved
+    conf = os.path.join(cubrid_home, "conf", "cm.conf")
+    try:
+        with open(conf) as f:
+            text = f.read()
+    except IOError as e:
+        print("\033[33mcannot read %s (%s); support_mon_statistic is left "
+              "as it is.\033[0m" % (conf, e))
+        return
+    key = re.compile(r"^([ \t]*support_mon_statistic[ \t]*=?[ \t]*)(\S*)",
+                     re.IGNORECASE | re.MULTILINE)
+    found = key.search(text)
+    if found and found.group(2).lower() == "yes":
+        return
+    if found:
+        new_text = key.sub(r"\1YES", text, count=1)
+    else:
+        new_text = text.rstrip("\n") + "\nsupport_mon_statistic=YES\n"
+    with open(conf, "w") as f:
+        f.write(new_text)
+    cm_conf_saved = text
+    print("  support_mon_statistic set to YES in %s for this run" % conf)
+
+
+def restore_cm_conf(cubrid_home):
+    """Put back the cm.conf enable_mon_statistic() changed, if it did."""
+    global cm_conf_saved
+    if cm_conf_saved is None:
+        return
+    conf = os.path.join(cubrid_home, "conf", "cm.conf")
+    with open(conf, "w") as f:
+        f.write(cm_conf_saved)
+    cm_conf_saved = None
+    print("  %s restored" % conf)
 
 
 def run_service_cmd(args, what, timeout=300):
@@ -1149,6 +1214,7 @@ def restart_services():
     print("restarting the CUBRID service to start from a known state ...")
     run_service_cmd([cubrid_bin, "service", "stop"], "service stop")
     reset_mon_data(cubrid_home)
+    enable_mon_statistic(cubrid_home)
     run_service_cmd([cubrid_bin, "service", "start"], "service start")
     # demodb is what most of the cases run against; "service start" only starts
     # it when cubrid.conf lists it, so ask for it explicitly.
@@ -1178,6 +1244,7 @@ def stop_services():
     cubrid_bin = os.path.join(os.environ["CUBRID"], "bin", "cubrid")
     print("stopping the CUBRID service ...")
     run_service_cmd([cubrid_bin, "service", "stop"], "service stop")
+    restore_cm_conf(os.environ["CUBRID"])
 
 
 def init_env():
@@ -1207,7 +1274,7 @@ def init_env():
 
 # Command line:
 #   test_tasks.py [<test set>] [-fc|--file-check] [-ns|--no-sleep]
-#   test_tasks.py --dump <case> [<case> ...]
+#   test_tasks.py --dump [<version>] <case> [<case> ...]
 #
 # <test set> is the list file of the set to run, "task_status_check.txt" by
 # default. A bare name is looked up under task_test_case/.
@@ -1227,6 +1294,9 @@ def init_env():
 # differently across engines, so a baseline is only meaningful next to the
 # version it was taken from.
 #
+# The version also picks the request files: a case that has a copy under
+# <set>/2_change_case/<version>/ sends that one instead, see case_path().
+#
 # A case listed as "<case>,<status>" is status only in every mode -- it gets no
 # baseline and --file-check judges it by the status it declares.
 #
@@ -1240,8 +1310,17 @@ make_answer = False
 no_sleep = False
 listarg = DEFAULT_TEST_SET
 VERSION = DEFAULT_VERSION
+dump_names = []
 
-if not dump_mode:
+if dump_mode:
+    # A bare version picks the request overrides here too:
+    #   --dump 10.2 gettransactioninfo
+    for arg in args[1:]:
+        if normalize_version(arg):
+            VERSION = normalize_version(arg)
+        else:
+            dump_names.append(arg)
+else:
     rest = []
     for arg in args:
         if arg in ("-fc", "--file-check"):
@@ -1264,17 +1343,23 @@ if not dump_mode:
         sys.exit(2)
     if rest:
         listarg = rest[0]
-    if VERSION not in KNOWN_VERSIONS:
-        print("unknown version %s; known ones are %s"
-              % (VERSION.replace("_", "."),
-                 ", ".join(v.replace("_", ".") for v in KNOWN_VERSIONS)))
-        sys.exit(2)
     if file_check and make_answer:
         print("--file-check compares against the baseline, --answer replaces "
               "it; pick one")
         sys.exit(2)
 
+if VERSION not in KNOWN_VERSIONS:
+    print("unknown version %s; known ones are %s"
+          % (VERSION.replace("_", "."),
+             ", ".join(v.replace("_", ".") for v in KNOWN_VERSIONS)))
+    sys.exit(2)
+
 LIST_FILE, CASE_DIR, REPORT_BASE = resolve_test_set(listarg)
+
+if os.path.isdir(override_dir()):
+    overrides = sorted(os.listdir(override_dir()))
+    print("\033[33mrequest overrides for %s: %s (%s)\033[0m"
+          % (VERSION.replace("_", "."), override_dir(), ", ".join(overrides)))
 HOSTNAME = socket.gethostname()
 local_env = REPORT_BASE not in NO_LOCAL_ENV_SETS
 
@@ -1299,7 +1384,7 @@ token, CUBRID, CUBRID_DATABASES = init_env()
 results = []
 
 if dump_mode:
-    for name in args[1:]:
+    for name in dump_names:
         print("===== %s =====" % name)
         dump_one(name, token)
     sys.exit(0)
@@ -1321,7 +1406,7 @@ finally:
 
 # The reports are named after the test set, so running both sets leaves both
 # reports behind instead of one overwriting the other.
-xmlfile = os.path.join("log", REPORT_BASE + ".xml")
+xmlfile = os.path.join("log", REPORT_BASE + "_" + VERSION + ".xml")
 write_junit_xml(xmlfile)
 write_junit_xml(detail_xml_path(xmlfile), with_response=True)
 

@@ -14,6 +14,10 @@ HTTPS 인터페이스(`cm_port`, `/cm_api`)를 그대로 사용한다.
 - CMS(`cub_manager`)가 실행 중일 것 (`cubrid manager start`)
 - `python3` (표준 라이브러리만 사용, 추가 패키지 불필요)
 - CM 관리자 계정 정보. 기본값은 `admin` / `admin`이며 `task_test_case/<세트>/login`에 들어 있다.
+- `$CUBRID/conf/cm.conf`의 `support_mon_statistic`은 **손대지 않아도 된다.** 설치 기본값은
+  `NO`라 모니터링 수집이 돌지 않아 `set_mon_interval` / `get_mon_statistic`이 실패하는데,
+  러너가 service를 재시작할 때 `YES`로 켜고 실행이 끝나면 원래 내용으로 되돌린다
+  (`enable_mon_statistic()` / `restore_cm_conf()`). 로컬 환경을 건드리지 않는 HA 세트는 예외다.
 
 CMS는 `cm_port`에서 **HTTPS(자체 서명 인증서)** 로 서비스한다. 스크립트는 인증서를
 검증하지 않도록 되어 있다(`ssl._create_unverified_context()`).
@@ -48,6 +52,9 @@ cd server/test
 # 기준값(.answer) 재생성 -- 이 옵션 없이는 생성되지 않는다
 ./run_tests.sh -a 11.4 task_result_check.txt
 
+# 10.2 엔진 대상 실행 -- 2_change_case/10_2/ 의 요청 파일이 우선 사용된다
+./run_tests.sh 10.2 task_result_check.txt
+
 # 목록의 sleep 줄 무시 (비동기 처리가 없는 서버용)
 ./run_tests.sh -ns
 
@@ -56,6 +63,7 @@ cd server/test
 
 # 단건 응답을 실제 토큰으로 덤프 (문서 검증/작성용)
 ./run_tests.sh --dump getbrokersinfo checkfile
+./run_tests.sh --dump 10.2 gettransactioninfo
 
 # 리포트와 .result 파일 정리
 ./run_tests.sh --clean
@@ -103,6 +111,8 @@ server/test/
       <case>.answer                     기준 응답 (커밋 대상)
       <case>.result                     -fc 실행 결과 (git 미추적)
     task_result_check/11_5/  11_2/  11_0/  10_2/
+    task_result_check/2_change_case/<버전>/<case>
+                                      그 버전에서만 형태가 다른 요청 JSON (4.3.1)
   task_test_config/                   케이스가 읽을 픽스처
     test_analyzecaslog.sql.log          analyzecaslog 용 CAS 로그
     tmp_file_for_test/                  getcaslogtopresult / removecasrunnertmpfile 용
@@ -219,6 +229,27 @@ server/test/
 `$AUTO_*`는 예약 작업(backup/exec query 등)을 “곧 실행되도록” 만들기 위한 것이다.
 `$TEST_*`는 고정 id(pid `99999`, tranindex `2(+)`)로는 어느 호스트에서도 통과할 수 없던
 두 케이스를 결정적으로 만들기 위한 것이다.
+
+### 4.3.1 버전별 요청 파일: `2_change_case/<버전>/`
+
+10.2 / 11.0 처럼 오래된 엔진은 일부 요청을 다른 형태로 받는다. 그런 케이스만
+`<세트>/2_change_case/<버전>/<case>`에 사본을 두면, 그 버전으로 실행할 때 세트의
+파일 대신 사본을 보낸다(`case_path()`).
+
+```
+./run_tests.sh 10.2 task_result_check.txt
+  gettransactioninfo -> task_result_check/2_change_case/10_2/gettransactioninfo
+  login              -> task_result_check/login   (사본 없음 → 세트 파일)
+```
+
+- 버전은 `-a` / `-fc`와 같은 맨 인자이고, 생략하면 `DEFAULT_VERSION`(11.4)이다.
+- 목록의 케이스뿐 아니라 `login` / `getenv`(초기화)와 `--dump`에도 똑같이 적용된다.
+- 사본이 있는 버전으로 실행하면 시작할 때 사용되는 사본 목록을 한 줄 출력한다.
+- 세트 파일과 **내용이 다른 케이스만** 둔다. 같은 사본을 두면 세트 파일을 고칠 때
+  사본도 함께 고쳐야 하는 이중 관리가 된다.
+- 기준값 디렉터리(`<세트>/<버전>/`)와는 별개다. 기준값은 응답을, 이 디렉터리는 요청을 담는다.
+- CI(`cms-api-test.yml`)는 엔진 `VERSION` 파일의 major.minor(수동 실행 시 `test_version`
+  입력)를 버전 인자로 넘긴다. `KNOWN_VERSIONS`에 없는 버전이면 인자를 넘기지 않고 기본값으로 돈다.
 
 ### 4.4 시나리오 파일: `task_test_case/<세트>.txt`
 
@@ -412,8 +443,10 @@ task_test_case/task_result_check/11_4/<case>.result
 ### 4.6 `--dump` 모드
 
 ```sh
-python3 test_tasks.py --dump <name> [<name> ...]
+python3 test_tasks.py --dump [<버전>] <name> [<name> ...]
 ```
+
+버전을 주면 그 버전의 `2_change_case` 사본을 요청으로 쓴다(4.3.1).
 
 로그인해 **실제 토큰**으로 각 케이스를 1회 실행하고, 원본 JSON 응답을 그대로 출력한다.
 전체 목록은 실행하지 않는다. 실제 응답값을 확인하거나 `docs/api/*.md` 문서를 검증·갱신할 때 쓴다.
