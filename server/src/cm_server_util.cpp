@@ -22,6 +22,10 @@
  * cm_server_util.cpp -
  */
 
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -43,11 +47,13 @@
 #if defined(WINDOWS)
 #include <process.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <psapi.h>
 #include <sys/locking.h>
 #include <Tlhelp32.h>
 #include <sys/timeb.h>
 #include <winternl.h>
+#include <aclapi.h>           /* Get/SetNamedSecurityInfo () - move_file () ACL preservation */
 #include <windows.h>
 #include <shellapi.h>
 #include <tchar.h>
@@ -55,6 +61,7 @@
 #include <sys/types.h>        /* umask()          */
 #include <sys/stat.h>         /* umask(), stat()  */
 #include <unistd.h>
+#include <poll.h>
 #include <dirent.h>           /* opendir() ...    */
 #include <pwd.h>
 #include <sys/socket.h>
@@ -89,6 +96,8 @@
 #include "cm_stat.h"
 #include "cm_user.h"
 
+#include "openssl/rand.h"
+
 #include <assert.h>
 
 #ifdef FSERVER_SLAVE
@@ -96,6 +105,128 @@
 #else
 #define DEF_TASK_FUNC(TASK_FUNC_PTR)    NULL
 #endif
+
+/*
+ * cm_cmdb_pass_mutex ()/cm_cmdbinfo_temp_mutex ()/cm_conn_list_mutex () -
+ * see cm_server_util.h. Function-local static holders, same pattern as
+ * _statdumpd_mutex () in cm_job_task.cpp: each holder's constructor runs
+ * exactly once, the first time this function is called by any thread of
+ * this process (C++11 guarantees the init itself is thread-safe), so
+ * there is no separate init/destroy call for cub_cm_init_env () (or any
+ * other binary's startup) to remember to make.
+ *
+ * Each holder's destructor is deliberately empty: process exit runs
+ * these destructors on the main thread while other threads (a detached
+ * _reap_child_async () reaper, for instance) may still be running and
+ * could still call mutex_lock ()/mutex_unlock () on this same mutex, so
+ * destroying it here would race with them. Leaking it at exit is
+ * harmless; running its destructor while a live thread might still
+ * touch it is not.
+ */
+mutex_t *
+cm_cmdb_pass_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
+
+mutex_t *
+cm_cmdbinfo_temp_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
+
+mutex_t *
+cm_conn_list_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
+
+mutex_t *
+cm_auto_conf_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
+
+/*
+ * cm_auto_jobs_mutex () - guards autojobs.conf (FID_AUTO_JOBS_CONF), a
+ * separate file from the four auto*.conf files cm_auto_conf_mutex ()
+ * above already covers.
+ */
+mutex_t *
+cm_auto_jobs_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
 
 /* for ut_getdelim */
 #define MAX_LINE ((int)(10*1024*1024))
@@ -118,8 +249,8 @@ namespace
 
 static T_FSERVER_TASK_INFO task_info[] =
 {
-  {"startinfo", TS_STARTINFO, 0, DEF_TASK_FUNC (ts_startinfo), FSVR_SA, ALL_AUTHORITY},
-  {"userinfo", TS_USERINFO, 0, DEF_TASK_FUNC (ts_userinfo), FSVR_CS, ALL_AUTHORITY},
+  {"startinfo", TS_STARTINFO, 0, DEF_TASK_FUNC (ts_startinfo), FSVR_SA, AU_ANY},
+  {"userinfo", TS_USERINFO, 0, DEF_TASK_FUNC (ts_userinfo), FSVR_CS, AU_ANY},
   {"createuser", TS_CREATEUSER, 1, DEF_TASK_FUNC (ts_create_user), FSVR_CS, AU_DBO},
   {"deleteuser", TS_DELETEUSER, 1, DEF_TASK_FUNC (ts_delete_user), FSVR_CS, AU_DBO},
   {"updateuser", TS_UPDATEUSER, 1, DEF_TASK_FUNC (ts_update_user), FSVR_CS, AU_DBO},
@@ -128,75 +259,75 @@ static T_FSERVER_TASK_INFO task_info[] =
   {"renamedb", TS_RENAMEDB, 1, DEF_TASK_FUNC (tsRenameDB), FSVR_SA, AU_DBC},
   {"startdb", TS_STARTDB, 0, DEF_TASK_FUNC (tsStartDB), FSVR_NONE, AU_DBC | AU_DBO},
   {"stopdb", TS_STOPDB, 0, DEF_TASK_FUNC (tsStopDB), FSVR_CS,AU_DBC | AU_DBO},
-  {"dbspaceinfo", TS_DBSPACEINFO, 0, DEF_TASK_FUNC (tsDbspaceInfo), FSVR_SA_CS, ALL_AUTHORITY},
-  {"classinfo", TS_CLASSINFO, 0, DEF_TASK_FUNC (ts_class_info), FSVR_SA_CS, ALL_AUTHORITY},
-  {"class", TS_CLASS, 0, DEF_TASK_FUNC (ts_class), FSVR_CS, ALL_AUTHORITY},
+  {"dbspaceinfo", TS_DBSPACEINFO, 0, DEF_TASK_FUNC (tsDbspaceInfo), FSVR_SA_CS, AU_ANY},
+  {"classinfo", TS_CLASSINFO, 0, DEF_TASK_FUNC (ts_class_info), FSVR_SA_CS, AU_ANY},
+  {"class", TS_CLASS, 0, DEF_TASK_FUNC (ts_class), FSVR_CS, AU_ANY},
   {"setsysparam", TS_SETSYSPARAM, 1, DEF_TASK_FUNC (ts_set_sysparam), FSVR_NONE, AU_DBC | AU_DBO},
-  {"getallsysparam", TS_GETALLSYSPARAM, 0, DEF_TASK_FUNC (ts_get_all_sysparam), FSVR_NONE, ALL_AUTHORITY},
+  {"getallsysparam", TS_GETALLSYSPARAM, 0, DEF_TASK_FUNC (ts_get_all_sysparam), FSVR_NONE, AU_ANY},
   {"addvoldb", TS_ADDVOLDB, 1, DEF_TASK_FUNC (tsRunAddvoldb), FSVR_SA_CS, AU_DBC | AU_DBO},
-  {"getloginfo", TS_GETLOGINFO, 0, DEF_TASK_FUNC (ts_get_log_info), FSVR_NONE, ALL_AUTHORITY},
-  {"viewlog", TS_VIEWLOG, 0, DEF_TASK_FUNC (ts_view_log), FSVR_NONE, ALL_AUTHORITY},
-  {"viewlog2", TS_VIEWLOG, 0, DEF_TASK_FUNC (ts_view_log), FSVR_NONE, ALL_AUTHORITY},
+  {"getloginfo", TS_GETLOGINFO, 0, DEF_TASK_FUNC (ts_get_log_info), FSVR_NONE, AU_ANY},
+  {"viewlog", TS_VIEWLOG, 0, DEF_TASK_FUNC (ts_view_log), FSVR_NONE, AU_ANY},
+  {"viewlog2", TS_VIEWLOG, 0, DEF_TASK_FUNC (ts_view_log), FSVR_NONE, AU_ANY},
   {"resetlog", TS_RESETLOG, 0, DEF_TASK_FUNC (ts_reset_log), FSVR_NONE, AU_DBC | AU_DBO},
-  {"getenv", TS_GETENV, 0, DEF_TASK_FUNC (tsGetEnvironment), FSVR_SA_UC, ALL_AUTHORITY},
-  {"updateattribute", TS_UPDATEATTRIBUTE, 1, DEF_TASK_FUNC (ts_update_attribute), FSVR_CS, ALL_AUTHORITY},
+  {"getenv", TS_GETENV, 0, DEF_TASK_FUNC (tsGetEnvironment), FSVR_SA_UC, AU_ANY},
+  {"updateattribute", TS_UPDATEATTRIBUTE, 1, DEF_TASK_FUNC (ts_update_attribute), FSVR_CS, AU_DBC | AU_DBO},
   {"kill_process", TS_KILL_PROCESS, 1, DEF_TASK_FUNC (ts_kill_process), FSVR_NONE, AU_DBC | AU_DBO},
   {"copydb", TS_COPYDB, 1, DEF_TASK_FUNC (ts_copydb), FSVR_SA, AU_DBC},
   {"optimizedb", TS_OPTIMIZEDB, 1, DEF_TASK_FUNC (ts_optimizedb), FSVR_SA_CS, AU_DBC | AU_DBO},
-  {"plandump", TS_PLANDUMP, 1, DEF_TASK_FUNC (ts_plandump), FSVR_CS, ALL_AUTHORITY},
-  {"paramdump", TS_PARAMDUMP, 1, DEF_TASK_FUNC (ts_paramdump), FSVR_SA_CS, ALL_AUTHORITY},
-  {"statdump", TS_STATDUMP, 0, DEF_TASK_FUNC (ts_statdump), FSVR_CS, ALL_AUTHORITY},
+  {"plandump", TS_PLANDUMP, 1, DEF_TASK_FUNC (ts_plandump), FSVR_CS, AU_ANY},
+  {"paramdump", TS_PARAMDUMP, 1, DEF_TASK_FUNC (ts_paramdump), FSVR_SA_CS, AU_ANY},
+  {"statdump", TS_STATDUMP, 0, DEF_TASK_FUNC (ts_statdump), FSVR_CS, AU_ANY},
   {"checkdb", TS_CHECKDB, 0, DEF_TASK_FUNC (ts_checkdb), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"compactdb", TS_COMPACTDB, 1, DEF_TASK_FUNC (ts_compactdb), FSVR_SA, AU_DBC | AU_DBO},
-  {"backupdbinfo", TS_BACKUPDBINFO, 0, DEF_TASK_FUNC (ts_backupdb_info), FSVR_NONE, ALL_AUTHORITY},
+  {"backupdbinfo", TS_BACKUPDBINFO, 0, DEF_TASK_FUNC (ts_backupdb_info), FSVR_NONE, AU_ANY},
   {"backupdb", TS_BACKUPDB, 0, DEF_TASK_FUNC (ts_backupdb), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"unloaddb", TS_UNLOADDB, 1, DEF_TASK_FUNC (ts_unloaddb), FSVR_SA, AU_DBC | AU_DBO},
-  {"unloadinfo", TS_UNLOADDBINFO, 0, DEF_TASK_FUNC (ts_unloaddb_info), FSVR_NONE, ALL_AUTHORITY},
+  {"unloadinfo", TS_UNLOADDBINFO, 0, DEF_TASK_FUNC (ts_unloaddb_info), FSVR_NONE, AU_ANY},
   {"loaddb", TS_LOADDB, 1, DEF_TASK_FUNC (ts_loaddb), FSVR_SA, AU_DBC | AU_DBO},
-  {"gettransactioninfo", TS_GETTRANINFO, 0, DEF_TASK_FUNC (ts_get_tran_info), FSVR_CS, ALL_AUTHORITY},
+  {"gettransactioninfo", TS_GETTRANINFO, 0, DEF_TASK_FUNC (ts_get_tran_info), FSVR_CS, AU_ANY},
   {"killtransaction", TS_KILLTRAN, 1, DEF_TASK_FUNC (ts_killtran), FSVR_CS, AU_DBC | AU_DBO | AU_MON},
-  {"lockdb", TS_LOCKDB, 0, DEF_TASK_FUNC (ts_lockdb), FSVR_CS, ALL_AUTHORITY},
-  {"getbackuplist", TS_GETBACKUPLIST, 0, DEF_TASK_FUNC (ts_get_backup_list), FSVR_NONE, ALL_AUTHORITY},
+  {"lockdb", TS_LOCKDB, 0, DEF_TASK_FUNC (ts_lockdb), FSVR_CS, AU_ANY},
+  {"getbackuplist", TS_GETBACKUPLIST, 0, DEF_TASK_FUNC (ts_get_backup_list), FSVR_NONE, AU_ANY},
   {"restoredb", TS_RESTOREDB, 1, DEF_TASK_FUNC (ts_restoredb), FSVR_SA, AU_DBC | AU_DBO},
-  {"backupvolinfo", TS_BACKUPVOLINFO, 0, DEF_TASK_FUNC (ts_backup_vol_info), FSVR_SA, ALL_AUTHORITY},
-  {"getdbsize", TS_GETDBSIZE, 0, DEF_TASK_FUNC (ts_get_dbsize), FSVR_SA_CS, ALL_AUTHORITY},
-  {"getbackupinfo", TS_GETBACKUPINFO, 0, DEF_TASK_FUNC (ts_get_backup_info), FSVR_NONE, ALL_AUTHORITY},
+  {"backupvolinfo", TS_BACKUPVOLINFO, 0, DEF_TASK_FUNC (ts_backup_vol_info), FSVR_SA, AU_ANY},
+  {"getdbsize", TS_GETDBSIZE, 0, DEF_TASK_FUNC (ts_get_dbsize), FSVR_SA_CS, AU_ANY},
+  {"getbackupinfo", TS_GETBACKUPINFO, 0, DEF_TASK_FUNC (ts_get_backup_info), FSVR_NONE, AU_ANY},
   {"addbackupinfo", TS_ADDBACKUPINFO, 1, DEF_TASK_FUNC (ts_add_backup_info), FSVR_NONE, AU_DBC | AU_DBO | AU_JOB},
   {
     "deletebackupinfo", TS_DELETEBACKUPINFO, 1, DEF_TASK_FUNC (ts_delete_backup_info),
     FSVR_NONE, AU_DBC | AU_DBO | AU_JOB
   },
   {"setbackupinfo", TS_SETBACKUPINFO, 0, DEF_TASK_FUNC (ts_set_backup_info), FSVR_NONE, AU_DBC | AU_DBO | AU_JOB},
-  {"getautoaddvol", TS_GETAUTOADDVOL, 0, DEF_TASK_FUNC (ts_get_auto_add_vol), FSVR_NONE, ALL_AUTHORITY},
+  {"getautoaddvol", TS_GETAUTOADDVOL, 0, DEF_TASK_FUNC (ts_get_auto_add_vol), FSVR_NONE, AU_ANY},
   {"setautoaddvol", TS_SETAUTOADDVOL, 1, DEF_TASK_FUNC (ts_set_auto_add_vol), FSVR_NONE, AU_DBC | AU_DBO},
-  {"checkdir", TS_CHECKDIR, 0, DEF_TASK_FUNC (ts_check_dir), FSVR_NONE, ALL_AUTHORITY},
+  {"checkdir", TS_CHECKDIR, 0, DEF_TASK_FUNC (ts_check_dir), FSVR_NONE, AU_ANY},
   {
     "getautobackupdberrlog", TS_AUTOBACKUPDBERRLOG, 0, DEF_TASK_FUNC (ts_get_autobackupdb_error_log),
-    FSVR_NONE, ALL_AUTHORITY
+    FSVR_NONE, AU_ANY
   },
   {
     "getautoexecqueryerrlog", TS_AUTOEXECQUERYERRLOG, 0, DEF_TASK_FUNC (ts_get_autoexecquery_error_log),
-    FSVR_NONE, ALL_AUTHORITY
+    FSVR_NONE, AU_ANY
   },
   {
     "getdbmtuserinfo", TS_GETDBMTUSERINFO, 0, DEF_TASK_FUNC (tsGetDBMTUserInfo),
-    FSVR_NONE, ALL_AUTHORITY
+    FSVR_NONE, AU_ANY
   },
-  {"deletedbmtuser", TS_DELETEDBMTUSER, 1, DEF_TASK_FUNC (tsDeleteDBMTUser), FSVR_NONE, AU_DBC},
-  {"updatedbmtuser", TS_UPDATEDBMTUSER, 1, DEF_TASK_FUNC (tsUpdateDBMTUser), FSVR_NONE, AU_DBC},
-  {"setdbmtpasswd", TS_SETDBMTPASSWD, 1,DEF_TASK_FUNC (tsChangeDBMTUserPasswd), FSVR_NONE, ALL_AUTHORITY ^ AU_DBC},
-  {"adddbmtuser", TS_ADDDBMTUSER, 1, DEF_TASK_FUNC (tsCreateDBMTUser), FSVR_NONE, AU_DBC},
-  {"getaddvolstatus", TS_GETADDVOLSTATUS, 0, DEF_TASK_FUNC (ts_get_addvol_status), FSVR_NONE, ALL_AUTHORITY},
-  {"getautoaddvollog", TS_GETAUTOADDVOLLOG, 0, DEF_TASK_FUNC (tsGetAutoaddvolLog), FSVR_UC, ALL_AUTHORITY},
-  {"getinitbrokersinfo", TS2_GETINITUNICASINFO, 0, DEF_TASK_FUNC (ts2_get_unicas_info), FSVR_UC, ALL_AUTHORITY},
-  {"getbrokersinfo", TS2_GETUNICASINFO, 0, DEF_TASK_FUNC (ts2_get_unicas_info), FSVR_UC, ALL_AUTHORITY},
+  {"deletedbmtuser", TS_DELETEDBMTUSER, 1, DEF_TASK_FUNC (tsDeleteDBMTUser), FSVR_NONE, AU_ADMIN},
+  {"updatedbmtuser", TS_UPDATEDBMTUSER, 1, DEF_TASK_FUNC (tsUpdateDBMTUser), FSVR_NONE, AU_ADMIN},
+  {"setdbmtpasswd", TS_SETDBMTPASSWD, 1,DEF_TASK_FUNC (tsChangeDBMTUserPasswd), FSVR_NONE, AU_ANY},
+  {"adddbmtuser", TS_ADDDBMTUSER, 1, DEF_TASK_FUNC (tsCreateDBMTUser), FSVR_NONE, AU_ADMIN},
+  {"getaddvolstatus", TS_GETADDVOLSTATUS, 0, DEF_TASK_FUNC (ts_get_addvol_status), FSVR_NONE, AU_ANY},
+  {"getautoaddvollog", TS_GETAUTOADDVOLLOG, 0, DEF_TASK_FUNC (tsGetAutoaddvolLog), FSVR_UC, AU_ANY},
+  {"getinitbrokersinfo", TS2_GETINITUNICASINFO, 0, DEF_TASK_FUNC (ts2_get_unicas_info), FSVR_UC, AU_ANY},
+  {"getbrokersinfo", TS2_GETUNICASINFO, 0, DEF_TASK_FUNC (ts2_get_unicas_info), FSVR_UC, AU_ANY},
   {"startbroker", TS2_STARTUNICAS, 0, DEF_TASK_FUNC (ts2_start_unicas), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
   {"stopbroker", TS2_STOPUNICAS, 0, DEF_TASK_FUNC (ts2_stop_unicas), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
-  {"getadminloginfo", TS2_GETADMINLOGINFO, 0, DEF_TASK_FUNC (ts2_get_admin_log_info), FSVR_UC, ALL_AUTHORITY},
-  {"getlogfileinfo", TS2_GETLOGFILEINFO, 0, DEF_TASK_FUNC (ts2_get_logfile_info), FSVR_UC, ALL_AUTHORITY},
-  {"getaddbrokerinfo", TS2_GETADDBROKERINFO, 0, DEF_TASK_FUNC (ts2_get_add_broker_info), FSVR_UC, ALL_AUTHORITY},
+  {"getadminloginfo", TS2_GETADMINLOGINFO, 0, DEF_TASK_FUNC (ts2_get_admin_log_info), FSVR_UC, AU_ADMIN},
+  {"getlogfileinfo", TS2_GETLOGFILEINFO, 0, DEF_TASK_FUNC (ts2_get_logfile_info), FSVR_UC, AU_ANY},
+  {"getaddbrokerinfo", TS2_GETADDBROKERINFO, 0, DEF_TASK_FUNC (ts2_get_add_broker_info), FSVR_UC, AU_ANY},
   {"deletebroker", TS2_DELETEBROKER, 1, DEF_TASK_FUNC (ts2_delete_broker), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
-  {"getbrokerstatus", TS2_GETBROKERSTATUS, 0, DEF_TASK_FUNC (ts2_get_broker_status), FSVR_UC, ALL_AUTHORITY},
+  {"getbrokerstatus", TS2_GETBROKERSTATUS, 0, DEF_TASK_FUNC (ts2_get_broker_status), FSVR_UC, AU_ANY},
   {"broker_setparam", TS2_SETBROKERCONF, 1, DEF_TASK_FUNC (ts2_set_broker_conf), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
   {"broker_start", TS2_STARTBROKER, 0, DEF_TASK_FUNC (ts2_start_broker), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
   {"broker_stop", TS2_STOPBROKER, 0, DEF_TASK_FUNC (ts2_stop_broker), FSVR_UC, AU_DBC | AU_DBO | AU_BRK},
@@ -204,21 +335,21 @@ static T_FSERVER_TASK_INFO task_info[] =
     "broker_restart", TS2_RESTARTBROKERAS, 0, DEF_TASK_FUNC (ts2_restart_broker_as),
     FSVR_UC, AU_DBC | AU_DBO | AU_BRK
   },
-  {"checkfile", TS_CHECKFILE, 0, DEF_TASK_FUNC (ts_check_file), FSVR_NONE, ALL_AUTHORITY},
-  {"loadaccesslog", TS_LOADACCESSLOG, 0, DEF_TASK_FUNC (ts_load_access_log), FSVR_NONE, ALL_AUTHORITY},
-  {"getaccesslogfiles", TS_GETACCESSLOGFILES, 0, DEF_TASK_FUNC (ts_get_access_log_files), FSVR_NONE, ALL_AUTHORITY},
-  {"geterrorlogfiles", TS_GETERRORLOGFILES, 0, DEF_TASK_FUNC (ts_get_error_log_files), FSVR_NONE, ALL_AUTHORITY},
+  {"checkfile", TS_CHECKFILE, 0, DEF_TASK_FUNC (ts_check_file), FSVR_NONE, AU_ANY},
+  {"loadaccesslog", TS_LOADACCESSLOG, 0, DEF_TASK_FUNC (ts_load_access_log), FSVR_NONE, AU_ANY},
+  {"getaccesslogfiles", TS_GETACCESSLOGFILES, 0, DEF_TASK_FUNC (ts_get_access_log_files), FSVR_NONE, AU_ANY},
+  {"geterrorlogfiles", TS_GETERRORLOGFILES, 0, DEF_TASK_FUNC (ts_get_error_log_files), FSVR_NONE, AU_ANY},
   {"addtrigger", TS_ADDNEWTRIGGER, 1, DEF_TASK_FUNC (ts_trigger_operation), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"altertrigger", TS_ALTERTRIGGER, 1, DEF_TASK_FUNC (ts_trigger_operation), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"droptrigger", TS_DROPTRIGGER, 1, DEF_TASK_FUNC (ts_trigger_operation), FSVR_SA_CS, AU_DBC | AU_DBO},
-  {"gettriggerinfo", TS_GETTRIGGERINFO, 0, DEF_TASK_FUNC (ts_get_triggerinfo), FSVR_SA_CS, ALL_AUTHORITY},
-  {"getautoexecquery", TS_GETAUTOEXECQUERY, 0, DEF_TASK_FUNC (ts_get_autoexec_query), FSVR_SA_CS, ALL_AUTHORITY},
+  {"gettriggerinfo", TS_GETTRIGGERINFO, 0, DEF_TASK_FUNC (ts_get_triggerinfo), FSVR_SA_CS, AU_ANY},
+  {"getautoexecquery", TS_GETAUTOEXECQUERY, 0, DEF_TASK_FUNC (ts_get_autoexec_query), FSVR_SA_CS, AU_ANY},
   {
     "setautoexecquery", TS_SETAUTOEXECQUERY, 1, DEF_TASK_FUNC (ts_set_autoexec_query),
     FSVR_SA_CS, AU_DBC | AU_DBO | AU_JOB
   },
-  {"getdiagdata", TS_GET_DIAGDATA, 0, DEF_TASK_FUNC (ts_get_diagdata), FSVR_NONE, ALL_AUTHORITY},
-  {"getbrokerdiagdata", TS_GET_BROKER_DIAGDATA, 0, DEF_TASK_FUNC (ts_get_broker_diagdata), FSVR_NONE, ALL_AUTHORITY},
+  {"getdiagdata", TS_GET_DIAGDATA, 0, DEF_TASK_FUNC (ts_get_diagdata), FSVR_NONE, AU_ANY},
+  {"getbrokerdiagdata", TS_GET_BROKER_DIAGDATA, 0, DEF_TASK_FUNC (ts_get_broker_diagdata), FSVR_NONE, AU_ANY},
   {
     "addstatustemplate", TS_ADDSTATUSTEMPLATE, 0, DEF_TASK_FUNC (ts_addstatustemplate),
     FSVR_NONE, AU_DBC | AU_DBO | AU_MON
@@ -231,8 +362,8 @@ static T_FSERVER_TASK_INFO task_info[] =
     "removestatustemplate", TS_REMOVESTATUSTEMPLATE, 0, DEF_TASK_FUNC (ts_removestatustemplate),
     FSVR_NONE, AU_DBC | AU_DBO | AU_MON
   },
-  {"getstatustemplate", TS_GETSTATUSTEMPLATE, 0, DEF_TASK_FUNC (ts_getstatustemplate), FSVR_NONE, ALL_AUTHORITY},
-  {"analyzecaslog", TS_ANALYZECASLOG, 0, DEF_TASK_FUNC (ts_analyzecaslog), FSVR_NONE, ALL_AUTHORITY},
+  {"getstatustemplate", TS_GETSTATUSTEMPLATE, 0, DEF_TASK_FUNC (ts_getstatustemplate), FSVR_NONE, AU_ANY},
+  {"analyzecaslog", TS_ANALYZECASLOG, 0, DEF_TASK_FUNC (ts_analyzecaslog), FSVR_NONE, AU_ANY},
   {
     "executecasrunner", TS_EXECUTECASRUNNER, 0, DEF_TASK_FUNC (ts_executecasrunner),
     FSVR_NONE, AU_DBC | AU_DBO | AU_BRK | AU_MON
@@ -241,57 +372,58 @@ static T_FSERVER_TASK_INFO task_info[] =
     "removecasrunnertmpfile", TS_REMOVECASRUNNERTMPFILE, 0, DEF_TASK_FUNC (ts_removecasrunnertmpfile),
     FSVR_NONE, AU_DBC | AU_DBO | AU_BRK | AU_MON
   },
-  {"getcaslogtopresult", TS_GETCASLOGTOPRESULT, 0, DEF_TASK_FUNC (ts_getcaslogtopresult), FSVR_NONE, ALL_AUTHORITY},
-  {"dbmtuserlogin", TS_DBMTUSERLOGIN, 0, DEF_TASK_FUNC (tsDBMTUserLogin), FSVR_NONE, ALL_AUTHORITY},
-  {"removelog", TS_REMOVE_LOG, 0, DEF_TASK_FUNC (ts_remove_log), FSVR_NONE, ALL_AUTHORITY},
-  {"getdbprocstat", TS_GETDBPROCSTAT, 0, DEF_TASK_FUNC (ts_get_dbproc_stat), FSVR_SA_CS, ALL_AUTHORITY},
-  {"gethoststat", TS_GETHOSTSTAT, 0, DEF_TASK_FUNC (ts_get_host_stat), FSVR_SA_CS, ALL_AUTHORITY},
-  {"heartbeatlist", TS_HEARTBEAT_LIST, 0, DEF_TASK_FUNC (ts_heartbeat_list), FSVR_SA_CS, ALL_AUTHORITY},
+  {"getcaslogtopresult", TS_GETCASLOGTOPRESULT, 0, DEF_TASK_FUNC (ts_getcaslogtopresult), FSVR_NONE, AU_ANY},
+  {"dbmtuserlogin", TS_DBMTUSERLOGIN, 0, DEF_TASK_FUNC (tsDBMTUserLogin), FSVR_NONE, AU_ANY},
+  {"removelog", TS_REMOVE_LOG, 0, DEF_TASK_FUNC (ts_remove_log), FSVR_NONE, AU_DBC | AU_DBO},
+  {"getdbprocstat", TS_GETDBPROCSTAT, 0, DEF_TASK_FUNC (ts_get_dbproc_stat), FSVR_SA_CS, AU_ANY},
+  {"gethoststat", TS_GETHOSTSTAT, 0, DEF_TASK_FUNC (ts_get_host_stat), FSVR_SA_CS, AU_ANY},
+  {"heartbeatlist", TS_HEARTBEAT_LIST, 0, DEF_TASK_FUNC (ts_heartbeat_list), FSVR_SA_CS, AU_ANY},
   {"changemode", TS_CHANGEMODE, 0, DEF_TASK_FUNC (ts_changemode), FSVR_CS, AU_DBC | AU_DBO},
-  {"getdbmode", TS_GETDBMODE, 0, DEF_TASK_FUNC (ts_get_db_mode), FSVR_SA_CS, ALL_AUTHORITY},
+  {"getdbmode", TS_GETDBMODE, 0, DEF_TASK_FUNC (ts_get_db_mode), FSVR_SA_CS, AU_ANY},
   {
     "getstandbyserverstat", TS_GET_STANDBY_SERVER_STAT, 0, DEF_TASK_FUNC (ts_get_standby_server_stat),
-    FSVR_SA_CS, ALL_AUTHORITY
+    FSVR_SA_CS, AU_ANY
   },
   {"rolechange", TS_ROLE_CHANGE, 0, DEF_TASK_FUNC (ts_role_change), FSVR_CS, AU_DBC | AU_DBO},
-  {"userverify", TS_USER_VERIFY, 0, DEF_TASK_FUNC (ts_user_verify), FSVR_SA_CS, ALL_AUTHORITY},
-  {"runsqlstatement", TS_RUN_SQL_STATEMENT, 0, DEF_TASK_FUNC (ts_run_sql_statement), FSVR_SA_CS, ALL_AUTHORITY},
+  {"userverify", TS_USER_VERIFY, 0, DEF_TASK_FUNC (ts_user_verify), FSVR_SA_CS, AU_ANY},
+  {"runsqlstatement", TS_RUN_SQL_STATEMENT, 0, DEF_TASK_FUNC (ts_run_sql_statement), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"writeandsaveconf", TS_WRITE_AND_SAVE_CONF, 0, DEF_TASK_FUNC (ts_write_and_save_conf), FSVR_SA_CS, AU_DBC | AU_DBO},
-  {"getfiletotallinenum", TS_GET_FILE_TOTAL_LINE_NUM, 0, DEF_TASK_FUNC (ts_get_file_total_line_num), FSVR_SA_CS, ALL_AUTHORITY},
-  {"runscript", TS_RUN_SCRIPT, 0, DEF_TASK_FUNC (ts_run_script), FSVR_SA_CS, ALL_AUTHORITY},
+  {"getfiletotallinenum", TS_GET_FILE_TOTAL_LINE_NUM, 0, DEF_TASK_FUNC (ts_get_file_total_line_num), FSVR_SA_CS, AU_ANY},
+  {"runscript", TS_RUN_SCRIPT, 0, DEF_TASK_FUNC (ts_run_script), FSVR_SA_CS, AU_ADMIN},
   {"copyfolder", TS_COPY_FOLDER, 0, DEF_TASK_FUNC (ts_copy_folder), FSVR_SA_CS, AU_DBC | AU_DBO},
   {"deletefolder", TS_DELETE_FOLDER, 0, DEF_TASK_FUNC (ts_delete_folder), FSVR_SA_CS, AU_DBC | AU_DBO},
   {
     "getfolderswithkeyword", TS_GET_FOLDERS_WITH_KEYWORD, 0,DEF_TASK_FUNC (ts_get_folders_with_keyword),
-    FSVR_SA_CS, ALL_AUTHORITY
+    FSVR_SA_CS, AU_ANY
   },
-  {"getenvvarbyname", TS_GET_ENVVAR_BY_NAME, 0, DEF_TASK_FUNC (ts_get_envvar_by_name), FSVR_SA_CS, ALL_AUTHORITY},
-  {"errortrace", TS_ERROR_TRACE, 0, DEF_TASK_FUNC (ts_error_trace), FSVR_SA_CS, ALL_AUTHORITY},
-  {"login", TS_LOGIN, 0, DEF_TASK_FUNC (ts_login), FSVR_SA_CS, ALL_AUTHORITY},
-  {"logout", TS_LOGOUT, 0, DEF_TASK_FUNC (ts_logout), FSVR_SA_CS, ALL_AUTHORITY},
-  {"getcmsenv", TS_GET_CMS_ENV, 0, DEF_TASK_FUNC (ts_get_cms_env), FSVR_SA_CS, ALL_AUTHORITY},
-  {"keepalive", TS_KEEPALIVE, 0, DEF_TASK_FUNC (ts_keepalive), FSVR_CS, ALL_AUTHORITY},
+  {"getenvvarbyname", TS_GET_ENVVAR_BY_NAME, 0, DEF_TASK_FUNC (ts_get_envvar_by_name), FSVR_SA_CS, AU_ANY},
+  {"errortrace", TS_ERROR_TRACE, 0, DEF_TASK_FUNC (ts_error_trace), FSVR_SA_CS, AU_ANY},
+  {"login", TS_LOGIN, 0, DEF_TASK_FUNC (ts_login), FSVR_SA_CS, AU_ANY},
+  {"logout", TS_LOGOUT, 0, DEF_TASK_FUNC (ts_logout), FSVR_SA_CS, AU_ANY},
+  {"getcmsenv", TS_GET_CMS_ENV, 0, DEF_TASK_FUNC (ts_get_cms_env), FSVR_SA_CS, AU_ANY},
+  {"keepalive", TS_KEEPALIVE, 0, DEF_TASK_FUNC (ts_keepalive), FSVR_CS, AU_ANY},
   {"removefiles", TS_REMOVE_FILES, 0, DEF_TASK_FUNC (ts_remove_files), FSVR_NONE, AU_DBC | AU_DBO},
-  {"#jobtest", TS_JOB_TEST, 0, DEF_TASK_FUNC (ts_job_test), FSVR_NONE, ALL_AUTHORITY},
-  {"dbspace", TS_DB_SPACE_INFO, 0, DEF_TASK_FUNC (ts_dbs_spaceInfo), FSVR_NONE, ALL_AUTHORITY},
+  {"dbspace", TS_DB_SPACE_INFO, 0, DEF_TASK_FUNC (ts_dbs_spaceInfo), FSVR_NONE, AU_ANY},
   {"shard_start", TS_SHARD_START, 0, DEF_TASK_FUNC (ts_shard_start), FSVR_NONE, AU_DBC | AU_DBO | AU_BRK},
   {"shard_stop", TS_SHARD_STOP, 0, DEF_TASK_FUNC (ts_shard_stop), FSVR_NONE, AU_DBC | AU_DBO | AU_BRK},
-  {"getshardinfo", TS_GET_SHARD_INFO, 0, DEF_TASK_FUNC (ts_get_shard_info), FSVR_NONE, ALL_AUTHORITY},
-  {"getshardstatus", TS_GET_SHARD_STATUS, 0, DEF_TASK_FUNC (ts_get_shard_status), FSVR_NONE, ALL_AUTHORITY},
+  {"getshardinfo", TS_GET_SHARD_INFO, 0, DEF_TASK_FUNC (ts_get_shard_info), FSVR_NONE, AU_ANY},
+  {"getshardstatus", TS_GET_SHARD_STATUS, 0, DEF_TASK_FUNC (ts_get_shard_status), FSVR_NONE, AU_ANY},
   {"broker_changer", TS_BROKER_CHANGER, 0, DEF_TASK_FUNC (ts_broker_changer), FSVR_NONE, AU_DBC | AU_DBO | AU_BRK},
   {"ha_start", TS_HA_START, 0, DEF_TASK_FUNC (ts_ha_start), FSVR_NONE, AU_DBC | AU_DBO},
   {"ha_stop", TS_HA_STOP, 0, DEF_TASK_FUNC (ts_ha_stop), FSVR_NONE, AU_DBC | AU_DBO},
-  {"ha_status", TS_HA_STATUS, 0, DEF_TASK_FUNC (ts_ha_status), FSVR_NONE, ALL_AUTHORITY},
+  {"ha_status", TS_HA_STATUS, 0, DEF_TASK_FUNC (ts_ha_status), FSVR_NONE, AU_ANY},
   {"ha_copylogdb", TS_HA_COPYLOGDB, 0, DEF_TASK_FUNC (ts_ha_copylogdb), FSVR_NONE, AU_DBC | AU_DBO},
   {"ha_applylogdb", TS_HA_APPLYLOGDB, 0, DEF_TASK_FUNC (ts_ha_applylogdb), FSVR_NONE, AU_DBC | AU_DBO},
   {"ha_reload", TS_HA_RELOAD, 0, DEF_TASK_FUNC (ts_ha_reload), FSVR_NONE, AU_DBC | AU_DBO},
-  {"list_dir", TS_LIST_DIR, 0, DEF_TASK_FUNC (ts_list_dir), FSVR_NONE, ALL_AUTHORITY},
+  {"list_dir", TS_LIST_DIR, 0, DEF_TASK_FUNC (ts_list_dir), FSVR_NONE, AU_ANY},
   {"autoupdate", TS_AUTO_UPDATE, 0, DEF_TASK_FUNC (ts_auto_update), FSVR_NONE, AU_ADMIN},
   {"isupdatesuccess", TS_IS_UPDATE_SUCCESS, 0, DEF_TASK_FUNC (ts_is_update_success), FSVR_NONE, AU_ADMIN},
-  {"monitorprocess", TS_MONITOR_PROCESS, 0, DEF_TASK_FUNC (ts_monitor_process), FSVR_NONE, ALL_AUTHORITY},
-  {"generatecert", TS_GENERATE_CERT, 0, DEF_TASK_FUNC (ts_generate_cert), FSVR_NONE, ALL_AUTHORITY},
-  {"start_statdump", TS_START_STATDUMP, 0, DEF_TASK_FUNC (ts_start_statdump), FSVR_CS, ALL_AUTHORITY},
-  {"stop_statdump", TS_STOP_STATDUMP, 0, DEF_TASK_FUNC (ts_stop_statdump), FSVR_CS, ALL_AUTHORITY},
+  {"monitorprocess", TS_MONITOR_PROCESS, 0, DEF_TASK_FUNC (ts_monitor_process), FSVR_NONE, AU_ANY},
+#if !defined (NDEBUG)
+  {"generatecert", TS_GENERATE_CERT, 0, DEF_TASK_FUNC (ts_generate_cert), FSVR_NONE, AU_ADMIN},
+#endif
+  {"start_statdump", TS_START_STATDUMP, 0, DEF_TASK_FUNC (ts_start_statdump), FSVR_CS, AU_DBC | AU_DBO | AU_MON},
+  {"stop_statdump", TS_STOP_STATDUMP, 0, DEF_TASK_FUNC (ts_stop_statdump), FSVR_CS, AU_DBC | AU_DBO | AU_MON},
   {NULL, TS_UNDEFINED, 0, NULL, FSVR_NONE, 0}
 };
 
@@ -312,7 +444,7 @@ static volatile NT_QUERY_SYSTEM_INFORMATION s_pfnNtQuerySystemInformation = NULL
 #endif
 
 static int _maybe_ip_addr (char *hostname);
-static int _ip_equal_hostent (struct hostent *hp, char *token);
+static int _ip_equal_addrinfo (struct addrinfo *ai, char *token);
 static int get_short_filename (char *ret_name, int ret_name_len,
 			       char *short_filename);
 static bool delete_directory (const std::string &path);
@@ -324,6 +456,7 @@ const size_t ALLOWED_ENV_VARS_COUNT = sizeof (ALLOWED_ENV_VARS) / sizeof (ALLOWE
 /*
  * We allow $CUBRID on Linux and %CUBRID% on Windows.
  */
+
 #if defined (WINDOWS)
 const std::string FORBIDDEN_CHARS = "` \t$&(|)><\n\r*;{}[]";
 #else
@@ -333,21 +466,27 @@ const std::string FORBIDDEN_CHARS = "` \t%&(|)><\n\r;*{}[]";
 int
 _op_check_is_localhost (char *token, char *hname)
 {
-  struct hostent *hp;
+  struct addrinfo hints;
+  struct addrinfo *res = NULL;
+  int ret = -1;
 
-  if ((hp = gethostbyname (hname)) == NULL)
-    {
-      return -1;
-    }
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
 
   /* if token is an ip address. */
   if (_maybe_ip_addr (token) > 0)
     {
       /* if token equal 127.0.0.1 or the ip is in the list of hname. */
-      if ((strcmp (token, "127.0.0.1") == 0)
-	  || _ip_equal_hostent (hp, token) == 0)
+      if (getaddrinfo (hname, NULL, &hints, &res) != 0 || res == NULL)
 	{
-	  return 0;
+	  return -1;
+	}
+
+      if ((strcmp (token, "127.0.0.1") == 0)
+	  || _ip_equal_addrinfo (res, token) == 0)
+	{
+	  ret = 0;
 	}
     }
   else
@@ -359,10 +498,16 @@ _op_check_is_localhost (char *token, char *hname)
       if ((strcasecmp (token, hname) == 0)
 	  || (strcasecmp (token, "localhost") == 0))
 	{
-	  return 0;
+	  ret = 0;
 	}
     }
-  return -1;
+
+  if (res != NULL)
+    {
+      freeaddrinfo (res);
+    }
+
+  return ret;
 }
 
 static int
@@ -376,23 +521,26 @@ _maybe_ip_addr (char *hostname)
 }
 
 static int
-_ip_equal_hostent (struct hostent *hp, char *token)
+_ip_equal_addrinfo (struct addrinfo *ai, char *token)
 {
-  int i;
+  struct addrinfo *cur;
   int retval = -1;
-  const char *tmpstr = NULL;
-  struct in_addr inaddr;
+  char tmpstr[INET_ADDRSTRLEN];
 
-  if (hp == NULL)
+  if (ai == NULL)
     {
       return retval;
     }
 
-  for (i = 0; hp->h_addr_list[i] != NULL; i++)
+  for (cur = ai; cur != NULL; cur = cur->ai_next)
     {
+      struct sockaddr_in *sin = (struct sockaddr_in *) cur->ai_addr;
+
       /* change ip address of hname to string. */
-      inaddr.s_addr = * (unsigned long *) hp->h_addr_list[i];
-      tmpstr = inet_ntoa (inaddr);
+      if (inet_ntop (AF_INET, &sin->sin_addr, tmpstr, sizeof (tmpstr)) == NULL)
+	{
+	  continue;
+	}
 
       /* compare the ip string with token. */
       if (strcmp (token, tmpstr) == 0)
@@ -408,6 +556,34 @@ void
 append_host_to_dbname (char *name_buf, const char *dbname, int buf_len)
 {
   snprintf (name_buf, buf_len, "%s@127.0.0.1", dbname);
+}
+
+/*
+ * strip_host_from_dbname () - copy dbname into name_buf without the
+ * "@host" part, so "demodb" and "demodb@127.0.0.1" both name the local db
+ *   return: 0 on success, -1 if the name part is empty or does not fit
+ */
+int
+strip_host_from_dbname (char *name_buf, const char *dbname, int buf_len)
+{
+  const char *at;
+  size_t len;
+
+  if (name_buf == NULL || dbname == NULL || buf_len <= 0)
+    {
+      return -1;
+    }
+
+  at = strchr (dbname, '@');
+  len = (at != NULL) ? (size_t) (at - dbname) : strlen (dbname);
+  if (len == 0 || len >= (size_t) buf_len)
+    {
+      return -1;
+    }
+
+  memcpy (name_buf, dbname, len);
+  name_buf[len] = '\0';
+  return 0;
 }
 
 void *
@@ -428,10 +604,13 @@ increase_capacity (void *ptr, int block_size, int old_count, int new_count)
     }
   else
     {
-      if ((ptr = realloc (ptr, block_size * new_count)) == NULL)
+      void *new_ptr = realloc (ptr, block_size * new_count);
+      if (new_ptr == NULL)
 	{
+	  free (ptr);
 	  return NULL;
 	}
+      ptr = new_ptr;
       memset ((char *) ptr + old_count * block_size, 0,
 	      block_size * (new_count - old_count));
     }
@@ -545,16 +724,15 @@ uRemoveCRLF (char *str)
 char *
 time_to_str (time_t t, const char *fmt, char *buf, int type)
 {
-  struct tm ltm;
+  struct tm ltm = {};
   struct tm *tm_p;
 
-  tm_p = localtime (&t);
+  tm_p = LOCALTIME_R (&t, &ltm);
   if (tm_p == NULL)
     {
       *buf = '\0';
       return buf;
     }
-  ltm = *tm_p;
 
   if (type == TIME_STR_FMT_DATE)
     {
@@ -605,7 +783,60 @@ write_manager_error_log (const char *protocol_str, const char *msg)
 
   snprintf (message, DBMT_ERROR_MSG_SIZE, "%s %s", protocol_str, msg);
 
-  LOG_ERROR (message);
+  LOG_ERROR ("%s", message);
+}
+
+/*
+ * ut_log_msg_with_login_ip () - the message part of an access or error log
+ *   line, with the session's login IP appended when the request came from
+ *   another address.
+ *
+ *   _IP is the IP the session logged in from (set by token validation) and
+ *   _CLIENTIP the address this request came from; both are in the form of
+ *   ut_normalize_ip (). When they differ, " login_ip=<_IP>" is appended to
+ *   msg, at the end so that the fields before it keep their positions
+ *   (loadaccesslog reads them by position). A request without a validated
+ *   token (login) has no _IP and gets msg unchanged.
+ *
+ *   The log writers cut "<head> <msg>" at DBMT_ERROR_MSG_SIZE; msg is cut
+ *   here instead so that login_ip is kept.
+ *
+ *   return: msg, or buf holding msg with login_ip
+ *   req(in): request
+ *   head(in): the part of the line before msg
+ *   msg(in): message
+ *   buf(out): buffer for msg with login_ip
+ *   buf_size(in): size of buf
+ */
+static const char *
+ut_log_msg_with_login_ip (nvplist *req, const char *head, const char *msg,
+			  char *buf, size_t buf_size)
+{
+  const char *login_ip, *client_ip;
+  char suffix[sizeof (" login_ip=") + DBMT_USER_IP_LEN];
+  int room;
+
+  login_ip = nv_get_val (req, "_IP");
+  client_ip = nv_get_val (req, "_CLIENTIP");
+  if (login_ip == NULL || login_ip[0] == '\0'
+      || (client_ip != NULL && strcmp (login_ip, client_ip) == 0))
+    {
+      return msg;
+    }
+
+  snprintf (suffix, sizeof (suffix), "%slogin_ip=%s",
+	    (msg[0] != '\0') ? " " : "", login_ip);
+
+  /* DBMT_ERROR_MSG_SIZE - NUL - head - ' ' - suffix */
+  room = DBMT_ERROR_MSG_SIZE - 1 - (int) strlen (head) - 1 - (int) strlen (suffix);
+  if (room < 0)
+    {
+      room = 0;
+    }
+
+  snprintf (buf, buf_size, "%.*s%s", room, msg, suffix);
+
+  return buf;
 }
 
 void
@@ -613,8 +844,11 @@ ut_error_log (nvplist *req, const char *errmsg)
 {
   const char *id, *addr, *task;
   char strbuf[512];
+  char msgbuf[DBMT_ERROR_MSG_SIZE];
 
-  if ((task = nv_get_val (req, "task")) == NULL)
+  /* _TASK is the task that runs (cub_cm_request_handler ()) */
+  if ((task = nv_get_val (req, "_TASK")) == NULL
+      && (task = nv_get_val (req, "task")) == NULL)
     {
       task = "-";
     }
@@ -633,7 +867,9 @@ ut_error_log (nvplist *req, const char *errmsg)
 
   snprintf (strbuf, sizeof (strbuf), "%s %s %s %s", ACCESS_ERR, id, addr, task);
 
-  write_manager_error_log (strbuf, errmsg);
+  write_manager_error_log (strbuf,
+			   ut_log_msg_with_login_ip (req, strbuf, errmsg,
+			       msgbuf, sizeof (msgbuf)));
 }
 
 void
@@ -643,7 +879,7 @@ write_manager_access_log (const char *protocol_str, const char *msg)
 
   snprintf (message, DBMT_ERROR_MSG_SIZE, "%s %s", protocol_str, msg);
 
-  LOG_INFO (message);
+  LOG_INFO ("%s", message);
 }
 
 void
@@ -651,10 +887,13 @@ ut_access_log (nvplist *req, const char *msg)
 {
   const char *id, *cli_addr, *task;
   char strbuf[512];
+  char msgbuf[DBMT_ERROR_MSG_SIZE];
 
   strbuf[0] = '\0';
 
-  if ((task = nv_get_val (req, "task")) == NULL)
+  /* _TASK is the task that runs (cub_cm_request_handler ()) */
+  if ((task = nv_get_val (req, "_TASK")) == NULL
+      && (task = nv_get_val (req, "task")) == NULL)
     {
       task = "-";
     }
@@ -673,8 +912,14 @@ ut_access_log (nvplist *req, const char *msg)
 
   snprintf (strbuf, sizeof (strbuf), "%s %s %s %s", ACCESS_LOG, id, cli_addr, task);
 
-  write_manager_access_log (strbuf, msg);
+  write_manager_access_log (strbuf,
+			    ut_log_msg_with_login_ip (req, strbuf, msg,
+				msgbuf, sizeof (msgbuf)));
 }
+
+/* the session keeps a normalized address in user_ip (DBMT_USER_IP_LEN) */
+static_assert (DBMT_USER_IP_LEN >= INET6_ADDRSTRLEN,
+	       "DBMT_USER_IP_LEN is smaller than INET6_ADDRSTRLEN");
 
 int
 ut_get_task_info (const char *task, char *access_log_flag,
@@ -840,47 +1085,151 @@ error_return:
   return -1;
 }
 
-void
-ut_daemon_start (void)
+#if !defined (WINDOWS)
+#if !defined (UT_DAEMON_START_TIMEOUT_SEC)
+#define UT_DAEMON_START_TIMEOUT_SEC     60
+#endif
+
+/*
+ * wait_daemon_started () - in the parent of ut_daemon_start (), wait for the
+ *   daemon to report its start on the pipe
+ *
+ *   return: the exit code of the parent: 0 if the daemon reported that it
+ *           started, 1 if it ended without reporting (it printed why), or
+ *           did not report within UT_DAEMON_START_TIMEOUT_SEC
+ *   fd(in): read end of the pipe
+ *   child(in): pid of the daemon, for the message
+ */
+static int
+wait_daemon_started (int fd, int child)
 {
+  struct pollfd pfd;
+  time_t deadline = time (NULL) + UT_DAEMON_START_TIMEOUT_SEC;
+  char c;
+
+  for (;;)
+    {
+      time_t now = time (NULL);
+      int r;
+      ssize_t n;
+
+      if (now >= deadline)
+	{
+	  char msg[DBMT_ERROR_MSG_SIZE];
+
+	  snprintf (msg, sizeof (msg),
+		    "CUBRID Manager Server : the server process (pid %d) did not report its start within %d "
+		    "seconds; see %s.\n", child, UT_DAEMON_START_TIMEOUT_SEC, sco.szErrorLog);
+	  ut_record_cubrid_utility_log_stderr (msg);
+	  return 1;
+	}
+      pfd.fd = fd;
+      pfd.events = POLLIN;
+      pfd.revents = 0;
+      r = poll (&pfd, 1, (int) (deadline - now) * 1000);
+      if (r < 0 && errno == EINTR)
+	{
+	  continue;
+	}
+      if (r <= 0)
+	{
+	  continue;		/* timed out: the deadline check above reports it */
+	}
+      n = read (fd, &c, 1);
+      if (n < 0 && errno == EINTR)
+	{
+	  continue;
+	}
+      /* 'S': started; EOF: the daemon ended before starting, after printing why */
+      return (n == 1 && c == 'S') ? 0 : 1;
+    }
+}
+#endif
+
+/*
+ * ut_daemon_start () - detach from the terminal and continue in a child
+ *
+ *   The parent does not return: it waits until the child reports its start
+ *   with ut_daemon_started () and exits with 0, or exits with 1 when the child
+ *   ends without reporting (a failed start, which the child prints on stderr
+ *   before it exits) or does not report in time. So the program that runs
+ *   "cub_manager start" gets the result of the start, after its messages.
+ *   Nothing is done on Windows.
+ *
+ *   ready_fd(out): in the child, the write end of the pipe to report on
+ *                  (close on exec, so that the programs tasks run do not keep
+ *                  it); -1 when there is none
+ */
+void
+ut_daemon_start (int *ready_fd)
+{
+  *ready_fd = -1;
 #if defined(WINDOWS)
   return;
 #else
   int childpid;
+  int fds[2];
+  bool have_pipe;
+
+  have_pipe = (pipe (fds) == 0);
+  if (have_pipe)
+    {
+      (void) fcntl (fds[0], F_SETFD, FD_CLOEXEC);
+      (void) fcntl (fds[1], F_SETFD, FD_CLOEXEC);
+    }
 
   /* Ignore the terminal stop signals */
   signal (SIGTTOU, SIG_IGN);
   signal (SIGTTIN, SIG_IGN);
   signal (SIGTSTP, SIG_IGN);
 
-#if 0
-  /* to make it run in background */
-  signal (SIGHUP, SIG_IGN);
-  childpid = PROC_FORK ();
-  if (childpid > 0)
-    {
-      exit (0);  /* kill parent */
-    }
-#endif
-
   /* setpgrp(); */
-  setsid ();            /* become process group leader and  */
+  setsid ();			/* become process group leader and  */
   /* disconnect from control terminal */
 
   signal (SIGHUP, SIG_IGN);
-  childpid = PROC_FORK ();    /* to prevent from reaquiring control terminal */
+  childpid = PROC_FORK ();	/* to prevent from reaquiring control terminal */
   if (childpid > 0)
     {
-      exit (0);  /* kill parent */
+      if (!have_pipe)
+	{
+	  exit (0);		/* kill parent */
+	}
+      close (fds[1]);
+      exit (wait_daemon_started (fds[0], childpid));
     }
 
-#if 0
-  /* change current working directory */
-  chdir ("/");
-  /* clear umask */
-  umask (0);
-#endif
+  if (have_pipe)
+    {
+      close (fds[0]);
+      *ready_fd = fds[1];
+    }
 #endif /* ifndef WINDOWS */
+}
+
+/*
+ * ut_daemon_started () - in the child of ut_daemon_start (), report that the
+ *   server has started, so that the parent exits with 0, and close the pipe
+ *
+ *   ready_fd(in/out): the write end from ut_daemon_start (); set to -1
+ */
+void
+ut_daemon_started (int *ready_fd)
+{
+#if !defined(WINDOWS)
+  if (*ready_fd >= 0)
+    {
+      char c = 'S';
+
+      /* SIGPIPE is ignored: if the parent gave up waiting, this fails with EPIPE */
+      while (write (*ready_fd, &c, 1) < 0 && errno == EINTR)
+	{
+	  ;
+	}
+      close (*ready_fd);
+    }
+#endif
+  *ready_fd = -1;
 }
 
 int
@@ -1006,9 +1355,9 @@ uWriteDBnfo (void)
 {
   T_SERVER_STATUS_RESULT *cmd_res;
 
-  cmd_res = cmd_server_status ();
+  cmd_res = cmd_cms_server_status ();
   uWriteDBnfo2 (cmd_res);
-  cmd_servstat_result_free (cmd_res);
+  cmd_cms_result_free (cmd_res);
 }
 
 void
@@ -1018,13 +1367,11 @@ uWriteDBnfo2 (T_SERVER_STATUS_RESULT *cmd_res)
   int dbcnt;
   char strbuf[1024];
   int dbvect[MAX_INSTALLED_DB] = { 0 };
-  int lock_fd;
   FILE *outfp;
   T_SERVER_STATUS_INFO *info;
 
-  lock_fd =
-	  uCreateLockFile (conf_get_dbmt_file (FID_LOCK_PSVR_DBINFO, strbuf));
-  if (lock_fd < 0)
+  file_resource_guard guard (*cm_cmdbinfo_temp_mutex (), FID_LOCK_PSVR_DBINFO);
+  if (!guard.ok ())
     {
       return;
     }
@@ -1042,6 +1389,11 @@ uWriteDBnfo2 (T_SERVER_STATUS_RESULT *cmd_res)
 	  info = (T_SERVER_STATUS_INFO *) cmd_res->result;
 	  for (i = 0; i < cmd_res->num_result && dbcnt < MAX_INSTALLED_DB; i++)
 	    {
+	      if (dbcnt >= MAX_INSTALLED_DB)
+		{
+		  break;
+		}
+
 	      if (_isRegisteredDB (info[i].db_name))
 		{
 		  dbvect[dbcnt] = i;
@@ -1057,8 +1409,28 @@ uWriteDBnfo2 (T_SERVER_STATUS_RESULT *cmd_res)
 	}
       fclose (outfp);
     }
+}
 
-  uRemoveLockFile (lock_fd);
+/*
+ * _host_is_resolvable () - thread-safe replacement for the gethostbyname (name) == NULL
+ */
+static int
+_host_is_resolvable (const char *name)
+{
+  struct addrinfo hints;
+  struct addrinfo *res = NULL;
+  int ok;
+
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+
+  ok = (getaddrinfo (name, NULL, &hints, &res) == 0 && res != NULL);
+  if (res != NULL)
+    {
+      freeaddrinfo (res);
+    }
+  return ok;
 }
 
 int
@@ -1068,9 +1440,8 @@ ut_get_dblist (nvplist *res, char dbdir_flag)
   char *dbinfo[4];
   char strbuf[1024], file[PATH_MAX];
   char hname[128];
-  struct hostent *hp;
-  unsigned char ip_addr[4];
   char *token = NULL;
+  char *saveptr;
 
   snprintf (file, PATH_MAX - 1, "%s/%s", sco.szCubrid_databases,
 	    CUBRID_DATABASE_TXT);
@@ -1081,12 +1452,11 @@ ut_get_dblist (nvplist *res, char dbdir_flag)
 
   memset (hname, 0, sizeof (hname));
   gethostname (hname, sizeof (hname));
-  if ((hp = gethostbyname (hname)) == NULL)
+  if (!_host_is_resolvable (hname))
     {
       fclose (infile);
       return ERR_NO_ERROR;
     }
-  memcpy (ip_addr, hp->h_addr_list[0], 4);
 
   nv_add_nvp (res, "open", "dblist");
   while (fgets (strbuf, sizeof (strbuf), infile))
@@ -1098,10 +1468,10 @@ ut_get_dblist (nvplist *res, char dbdir_flag)
 	  continue;
 	}
 
-      for (token = strtok (dbinfo[2], ":"); token != NULL;
-	   token = strtok (NULL, ":"))
+      for (token = STRTOK (dbinfo[2], ":", &saveptr); token != NULL;
+	   token = STRTOK (NULL, ":", &saveptr))
 	{
-	  if ((hp = gethostbyname (token)) == NULL)
+	  if (!_host_is_resolvable (token))
 	    {
 	      continue;
 	    }
@@ -1130,12 +1500,28 @@ ut_get_dblist (nvplist *res, char dbdir_flag)
 }
 
 int
-uCreateLockFile (char *lockfile)
+uCreateLockFile (char *lockfile, int timeout_ms)
 {
   int outfd;
 #if !defined(WINDOWS)
   struct flock lock;
 #endif
+  /*
+   * How long to keep retrying a contended lock before giving up.
+   */
+#if defined(WINDOWS)
+  const int retry_interval_ms = 100;    /* poll cadence: ~100ms on Windows */
+#else
+  const int retry_interval_ms = 10;     /* poll cadence: ~10ms on POSIX */
+#endif
+  int max_lock_retry;
+  int lock_retry;
+
+  if (timeout_ms < 0)
+    {
+      timeout_ms = 0;
+    }
+  max_lock_retry = timeout_ms / retry_interval_ms;
 
   outfd = open (lockfile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
@@ -1145,9 +1531,18 @@ uCreateLockFile (char *lockfile)
     }
 
 #if defined(WINDOWS)
-  while (_locking (outfd, _LK_NBLCK, 1) < 0)
+  for (lock_retry = 0; _locking (outfd, _LK_NBLCK, 1) < 0; lock_retry++)
     {
-      Sleep (100);
+      if (lock_retry >= max_lock_retry)
+	{
+	  /*
+	   * give up: close the fd we opened above before reporting
+	   * failure.
+	   */
+	  close (outfd);
+	  return -1;
+	}
+      Sleep (retry_interval_ms);
     }
 #else
   lock.l_type = F_WRLCK;
@@ -1155,9 +1550,14 @@ uCreateLockFile (char *lockfile)
   lock.l_whence = SEEK_SET;
   lock.l_len = 0;
 
-  while (fcntl (outfd, F_SETLK, &lock) < 0)
+  for (lock_retry = 0; fcntl (outfd, F_SETLK, &lock) < 0; lock_retry++)
     {
-      SLEEP_MILISEC (0, 10);
+      if (lock_retry >= max_lock_retry)
+	{
+	  close (outfd);
+	  return -1;
+	}
+      SLEEP_MILISEC (0, retry_interval_ms);
     }
 #endif
 
@@ -1201,18 +1601,46 @@ uRemoveDir (char *dir, int remove_file_in_dir)
 }
 
 #if defined(WINDOWS)
+/*
+ * folder_copy () does not follow links inside the tree. is_authorized_dirname
+ * () checked only the top source and destination directories, so a link
+ * below them must not lead the copy to a protected file (read) or under
+ * a program directory ($CUBRID/bin, lib, java) (write).
+ *
+ * win_is_link_entry () - the entry found by FindFirstFile ()/FindNextFile ()
+ *   is a symbolic link or a junction. Other reparse points (deduplicated or
+ *   cloud files) are ordinary files and are copied.
+ */
+static bool
+win_is_link_entry (const WIN32_FIND_DATA *data)
+{
+  return (data->dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+	 && (data->dwReserved0 == IO_REPARSE_TAG_SYMLINK
+	     || data->dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT);
+}
+
+/* `path` exists and is a reparse point (link, junction, ...) */
+static bool
+win_is_reparse_point (const char *path)
+{
+  DWORD attrs = GetFileAttributes (path);
+
+  return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+
 int
 folder_copy (const char *src_folder, const char *dest_folder)
 {
   WIN32_FIND_DATA FileData;
-  HANDLE hSearch;
+  HANDLE hSearch = INVALID_HANDLE_VALUE;
   DWORD dwAttrs;
   char src_dir[PATH_MAX];
   char dest_dir[PATH_MAX];
   char search_file[PATH_MAX];
   int retval = 0;
+  bool dest_created = false;
 
-  if (src_dir == NULL || dest_dir == NULL)
+  if (src_folder == NULL || dest_folder == NULL)
     {
       goto err_return;
     }
@@ -1229,6 +1657,7 @@ folder_copy (const char *src_folder, const char *dest_folder)
 	{
 	  goto err_return;
 	}
+      dest_created = true;
     }
 
   if (access (src_dir, F_OK) != 0 || access (dest_dir, F_OK) != 0)
@@ -1248,7 +1677,11 @@ folder_copy (const char *src_folder, const char *dest_folder)
       goto err_clean_return;
     }
 
-  while (FindNextFile (hSearch, &FileData))
+  /*
+   * FindFirstFile () already returned the first entry, which is not always
+   * ".", so it is handled before FindNextFile () is called
+   */
+  do
     {
       char src_path[PATH_MAX];
       char dest_path[PATH_MAX];
@@ -1257,16 +1690,30 @@ folder_copy (const char *src_folder, const char *dest_folder)
       snprintf (dest_path, PATH_MAX - 1, "%s/%s", dest_dir,
 		FileData.cFileName);
 
-      if (FileData.dwFileAttributes == FILE_ATTRIBUTE_DIRECTORY)
+      if (strcmp (FileData.cFileName, ".") == 0
+	  || strcmp (FileData.cFileName, "..") == 0)
 	{
-	  /* ignore folder "." and "..". */
-	  if (strcmp (FileData.cFileName, ".") == 0
-	      || strcmp (FileData.cFileName, "..") == 0)
-	    {
-	      continue;
-	    }
+	  continue;
+	}
 
-	  folder_copy (src_path, dest_path);
+      /*
+       * Do not follow links (see win_is_link_entry ()): a link or junction in
+       * the source fails the copy (creating one needs a privilege CMS may
+       * not have), and nothing is written through one in the destination.
+       */
+      if (win_is_link_entry (&FileData) || win_is_reparse_point (dest_path))
+	{
+	  goto err_clean_return;
+	}
+
+      /* a directory may carry other attributes too (read-only, hidden, ...) */
+      if (FileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+	{
+
+	  if (folder_copy (src_path, dest_path) < 0)
+	    {
+	      goto err_clean_return;
+	    }
 	  continue;
 	}
 
@@ -1283,6 +1730,7 @@ folder_copy (const char *src_folder, const char *dest_folder)
 	  goto err_clean_return;
 	}
     }
+  while (FindNextFile (hSearch, &FileData));
 
   /* Close the search handle. */
   FindClose (hSearch);
@@ -1290,9 +1738,25 @@ folder_copy (const char *src_folder, const char *dest_folder)
   return 0;
 
 err_clean_return:
-  uRemoveDir (dest_dir, REMOVE_DIR_FORCED);
+  /* close the search handle first, so that dest_dir can be removed */
+  if (hSearch != INVALID_HANDLE_VALUE)
+    {
+      FindClose (hSearch);
+      hSearch = INVALID_HANDLE_VALUE;
+    }
+  /*
+   * remove dest_dir only when this call created it: an existing directory may
+   * hold files that have nothing to do with this copy
+   */
+  if (dest_created)
+    {
+      uRemoveDir (dest_dir, REMOVE_DIR_FORCED);
+    }
 err_return:
-  FindClose (hSearch);
+  if (hSearch != INVALID_HANDLE_VALUE)
+    {
+      FindClose (hSearch);
+    }
   return -1;
 }
 #else
@@ -1304,8 +1768,9 @@ folder_copy (const char *src_folder, const char *dest_folder)
   struct dirent *dirp;
   struct stat statbuf;
   DIR *dp = NULL;
+  bool dest_created = false;
 
-  if (src_dir == NULL || dest_dir == NULL)
+  if (src_folder == NULL || dest_folder == NULL)
     {
       goto err_return;
     }
@@ -1321,6 +1786,7 @@ folder_copy (const char *src_folder, const char *dest_folder)
 	{
 	  goto err_return;
 	}
+      dest_created = true;
     }
 
   if (access (src_dir, F_OK) != 0 || access (dest_dir, F_OK) != 0)
@@ -1343,21 +1809,64 @@ folder_copy (const char *src_folder, const char *dest_folder)
       char src_path[COMPOSED_PATH_MAX];
       char dest_path[COMPOSED_PATH_MAX];
 
+      struct stat dest_stat;
+
+      if (uStringEqual (dirp->d_name, ".")
+	  || uStringEqual (dirp->d_name, ".."))
+	{
+	  continue;
+	}
+
       snprintf (src_path, sizeof (src_path), "%s/%s", src_dir,
 		dirp->d_name);
       snprintf (dest_path, sizeof (dest_path), "%s/%s", dest_dir,
 		dirp->d_name);
 
-      stat (src_path, &statbuf);
-
-      if (S_ISDIR (statbuf.st_mode))
+      /*
+       * Do not follow symbolic links. is_authorized_dirname () checked only
+       * the top source and destination directories, so a link below them
+       * must not lead the copy to a protected file (read) or under a
+       * program directory ($CUBRID/bin, lib, java) (write): lstat (), not
+       * stat (), and never write through a link already in the destination.
+       */
+      if (lstat (src_path, &statbuf) != 0)
 	{
-	  if (uStringEqual (dirp->d_name, ".")
-	      || uStringEqual (dirp->d_name, ".."))
-	    {
-	      continue;
-	    }
+	  goto err_clean_return;
+	}
+      if (lstat (dest_path, &dest_stat) == 0 && S_ISLNK (dest_stat.st_mode))
+	{
+	  goto err_clean_return;
+	}
 
+      if (S_ISLNK (statbuf.st_mode))
+	{
+	  /*
+	   * copy the link itself, as "cp -P" does; its target is not read. A
+	   * later file task on the copy resolves the link and is checked
+	   * against the protected files and the program directories as usual.
+	   */
+	  char target[PATH_MAX];
+	  ssize_t len = readlink (src_path, target, sizeof (target) - 1);
+
+	  if (len < 0)
+	    {
+	      goto err_clean_return;
+	    }
+	  target[len] = '\0';
+	  if (lstat (dest_path, &dest_stat) == 0)
+	    {
+	      if (S_ISDIR (dest_stat.st_mode) || unlink (dest_path) != 0)
+		{
+		  goto err_clean_return;
+		}
+	    }
+	  if (symlink (target, dest_path) != 0)
+	    {
+	      goto err_clean_return;
+	    }
+	}
+      else if (S_ISDIR (statbuf.st_mode))
+	{
 	  if (folder_copy (src_path, dest_path) < 0)
 	    {
 	      goto err_clean_return;
@@ -1377,7 +1886,19 @@ folder_copy (const char *src_folder, const char *dest_folder)
   return 0;
 
 err_clean_return:
-  uRemoveDir (dest_dir, REMOVE_DIR_FORCED);
+  if (dp != NULL)
+    {
+      closedir (dp);
+      dp = NULL;
+    }
+  /*
+   * remove dest_dir only when this call created it: an existing directory may
+   * hold files that have nothing to do with this copy
+   */
+  if (dest_created)
+    {
+      uRemoveDir (dest_dir, REMOVE_DIR_FORCED);
+    }
 err_return:
   if (dp != NULL)
     {
@@ -1908,7 +2429,12 @@ file_copy (char *src_file, char *dest_file)
 {
   char strbuf[1024];
   int src_fd, dest_fd;
-  size_t read_size, write_size;
+  /*
+   * signed: read ()/write () return -1 on error, which an unsigned type
+   * would turn into a huge count that passes the checks below (a full disk
+   * then silently produced a truncated dest_file and a "successful" copy)
+   */
+  int read_size, write_size;
   int mode = 0644;
 
 #if !defined(WINDOWS)
@@ -1940,11 +2466,10 @@ file_copy (char *src_file, char *dest_file)
     }
 #endif
 
-  while ((read_size = read (src_fd, strbuf, sizeof (strbuf))) > 0)
+  while ((read_size = (int) read (src_fd, strbuf, sizeof (strbuf))) > 0)
     {
-      if (read_size > sizeof (strbuf)
-	  || (write_size =
-		      write (dest_fd, strbuf, (unsigned int) read_size)) < read_size)
+      write_size = (int) write (dest_fd, strbuf, (unsigned int) read_size);
+      if (write_size != read_size)
 	{
 	  close (src_fd);
 	  close (dest_fd);
@@ -1954,22 +2479,195 @@ file_copy (char *src_file, char *dest_file)
     }
 
   close (src_fd);
-  close (dest_fd);
+
+  /* a read error, or a write error that only shows up when the file is closed */
+  if (close (dest_fd) != 0 || read_size < 0)
+    {
+      unlink (dest_file);
+      return -1;
+    }
 
   return 0;
 }
 
+#if defined (WINDOWS)
+/*
+ * restore_dest_acl_and_free () - apply a previously-captured owner/DACL back
+ *   onto dest_file, then free the security descriptor that was holding it.
+ *
+ *   The DACL (the actual permission/ACE list - what this fix is for) and
+ *   the owner are restored via two separate SetNamedSecurityInfo () calls,
+ *   deliberately not combined into one. Reassigning ownership requires
+ *   either SeRestorePrivilege or that the target owner be the caller's own
+ *   SID.
+ */
+static void
+restore_dest_acl_and_free (char *dest_file, PSID dest_owner, PACL dest_dacl,
+			   bool dest_dacl_protected, PSECURITY_DESCRIPTOR dest_sd)
+{
+  DWORD rc;
+  SECURITY_INFORMATION dacl_flags = DACL_SECURITY_INFORMATION;
+
+  if (dest_dacl_protected)
+    {
+      dacl_flags |= PROTECTED_DACL_SECURITY_INFORMATION;
+    }
+
+  rc = SetNamedSecurityInfo (dest_file, SE_FILE_OBJECT, dacl_flags,
+			     NULL, NULL, dest_dacl, NULL);
+  if (rc != ERROR_SUCCESS)
+    {
+      LOG_ERROR ("move_file (): SetNamedSecurityInfo () failed to restore '%s''s "
+		 "original DACL, error %lu", dest_file, (unsigned long) rc);
+    }
+
+  rc = SetNamedSecurityInfo (dest_file, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
+			     dest_owner, NULL, NULL, NULL);
+  if (rc != ERROR_SUCCESS)
+    {
+      LOG_ERROR ("move_file (): SetNamedSecurityInfo () failed to restore '%s''s "
+		 "original owner, error %lu (non-fatal: the file's permissions "
+		 "ACL was still restored above)", dest_file, (unsigned long) rc);
+    }
+
+  LocalFree (dest_sd);
+}
+#endif
+
 int
 move_file (char *src_file, char *dest_file)
 {
+#if !defined (WINDOWS)
+  /*
+   * Preserve dest_file's existing permissions/ownership
+   */
+  struct stat dest_statbuf;
+
+  if (stat (dest_file, &dest_statbuf) == 0)
+    {
+      errno = 0;
+      if (chown (src_file, dest_statbuf.st_uid, dest_statbuf.st_gid) < 0)
+	{
+	  LOG_WARN ("chown failed: %s, errno = %d", src_file, errno);
+	}
+
+      errno = 0;
+      if (chmod (src_file, dest_statbuf.st_mode & 07777) < 0)
+	{
+	  LOG_ERROR ("chmod failed: %s, errno = %d", src_file, errno);
+	}
+    }
+#else
+  /*
+   * Preserve dest_file's existing owner/DACL: both MoveFileEx () and the
+   * file_copy () fallback below replace dest_file's ACL along with its
+   * content
+   */
+  PSID dest_owner = NULL;
+  PACL dest_dacl = NULL;
+  PSECURITY_DESCRIPTOR dest_sd = NULL;
+  bool have_dest_acl = false;
+  bool dest_dacl_protected = false;
+
+  if (GetFileAttributes (dest_file) != INVALID_FILE_ATTRIBUTES)
+    {
+      DWORD gnsi_rc = GetNamedSecurityInfo (dest_file, SE_FILE_OBJECT,
+					    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+					    &dest_owner, NULL, &dest_dacl, NULL, &dest_sd);
+      if (gnsi_rc == ERROR_SUCCESS)
+	{
+	  have_dest_acl = true;
+
+	  SECURITY_DESCRIPTOR_CONTROL control = 0;
+	  DWORD revision;
+	  if (GetSecurityDescriptorControl (dest_sd, &control, &revision))
+	    {
+	      dest_dacl_protected = (control & SE_DACL_PROTECTED) != 0;
+	    }
+	}
+      else
+	{
+	  LOG_ERROR ("move_file (): GetNamedSecurityInfo () failed to read '%s''s "
+		     "current ACL, error %lu; the destination's original ACL will "
+		     "not be preserved", dest_file, (unsigned long) gnsi_rc);
+	}
+    }
+#endif
+
+  /*
+   * make the replace itself atomic wherever the filesystem allows it,
+   */
+#if defined (WINDOWS)
+  if (MoveFileEx (src_file, dest_file, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+    {
+      if (have_dest_acl)
+	{
+	  restore_dest_acl_and_free (dest_file, dest_owner, dest_dacl, dest_dacl_protected, dest_sd);
+	}
+      return 0;
+    }
+
+  {
+    DWORD move_file_ex_error = GetLastError ();
+
+    if (move_file_ex_error != ERROR_NOT_SAME_DEVICE
+	&& move_file_ex_error != ERROR_SHARING_VIOLATION
+	&& move_file_ex_error != ERROR_ACCESS_DENIED)
+      {
+	if (have_dest_acl)
+	  {
+	    LocalFree (dest_sd);
+	  }
+	return -1;
+      }
+
+    LOG_ERROR ("move_file (): MoveFileEx () of '%s' to '%s' failed with "
+	       "error %lu; falling back to a non-atomic copy", src_file,
+	       dest_file, (unsigned long) move_file_ex_error);
+  }
+#else
+  if (rename (src_file, dest_file) == 0)
+    {
+      /*
+       * Atomic same-filesystem replace succeeded
+       */
+      return 0;
+    }
+
+  if (errno != EXDEV)
+    {
+      return -1;
+    }
+
+  LOG_ERROR ("move_file (): rename () of '%s' to '%s' failed with "
+	     "EXDEV; falling back to a non-atomic copy", src_file,
+	     dest_file);
+#endif
+
+  /*
+   * Fallback for genuine cross-filesystem/cross-volume moves only.
+   */
   if (file_copy (src_file, dest_file) < 0)
     {
+#if defined (WINDOWS)
+      if (have_dest_acl)
+	{
+	  LocalFree (dest_sd);
+	}
+#endif
       return -1;
     }
   else
     {
       unlink (src_file);
     }
+
+#if defined (WINDOWS)
+  if (have_dest_acl)
+    {
+      restore_dest_acl_and_free (dest_file, dest_owner, dest_dacl, dest_dacl_protected, dest_sd);
+    }
+#endif
 
   return 0;
 }
@@ -2080,7 +2778,7 @@ is_cmserver_process (int pid, const char *module_name)
   argv[argc++] = "-e";
   argv[argc] = NULL;
 
-  if (run_child (argv, 1, NULL, result_file, NULL, NULL) < 0)
+  if (run_child_env (argv, RUN_FOREGROUND, NULL, result_file, NULL, NULL) < 0)
     {
       /* ps */
       return -1;
@@ -2171,29 +2869,23 @@ make_default_env (void)
 int
 _ut_get_dbaccess (nvplist *req, char *dbid, char *dbpasswd)
 {
-  int retval;
-  char *ip, *port, *dbname;
-  char _dbmt_error[1024];
-  T_DBMT_CON_DBINFO con_dbinfo;
+  char *token, *dbname;
 
   dbid[0] = dbpasswd[0] = '\0';
 
-  ip = nv_get_val (req, "_IP");
-  port = nv_get_val (req, "_PORT");
+  token = nv_get_val (req, "_TOKEN");
   dbname = nv_get_val (req, "dbname");
 
-  /* read conlist */
-  memset (&con_dbinfo, 0, sizeof (T_DBMT_CON_DBINFO));
-  if ((retval =
-	       dbmt_con_read_dbinfo (&con_dbinfo, ip, port, dbname,
-				     _dbmt_error)) <= 0)
+  /*
+   * Read the DB login this session stored with dbmtuserlogin (CBRD-26598).
+   * Only this session's own credentials are used; nothing is read from disk,
+   * and a different session or user cannot supply them.
+   */
+  if (!dbmt_user_session_get_dblogin (token, dbname, dbid, 32,
+				      dbpasswd, PASSWD_LENGTH + 1))
     {
       return 0;
     }
-
-  /* extract db user info */
-  strcpy (dbid, con_dbinfo.uid);
-  uDecrypt (PASSWD_LENGTH, con_dbinfo.passwd, dbpasswd);
 
   return 1;
 }
@@ -2353,79 +3045,6 @@ uGenerateStatus (nvplist *req, nvplist *res, int retval,
 }
 
 
-/* validate token and insert id */
-int
-ut_validate_token (nvplist *req)
-{
-  T_USER_TOKEN_INFO *token_info;
-
-  time_t active_time = 0;
-  time_t now_time = time (NULL);
-
-  //int retval;
-
-  char *ip, *port, *id, *tok[3];
-  char *token, token_content[TOKEN_LENGTH + 1];
-
-  if (!strcmp (nv_get_val (req, "task"), "login") ||
-      !strcmp (nv_get_val (req, "task"), "getcmsenv"))
-    {
-      ut_access_log (req, "task = login or getcmsenv.");
-      return 1;
-    }
-
-  if ((token = nv_get_val (req, "token")) == NULL)
-    {
-      return 0;
-    }
-  ut_access_log (req, "task != login or getcmsenv.");
-
-  uDecrypt (TOKEN_LENGTH, token, token_content);
-
-  if (string_tokenize2 (token_content, tok, 3, ':') < 0)
-    {
-      return 0;
-    }
-
-  ip = tok[0];
-  port = tok[1];
-  id = tok[2];
-
-  ut_access_log (req, id);
-
-  token_info = dbmt_user_search_token_info (id);
-  if (token_info == NULL)
-    {
-      ut_access_log (req, "can't find registered token.");
-      return 0;
-    }
-
-  if (strcmp (token_info->token, token))
-    {
-      ut_access_log (req, "tokens aren't equal!");
-      return 0;
-    }
-
-  ut_get_token_active_time (&active_time);
-
-  if (now_time - token_info->login_time > active_time)
-    {
-      return 0;
-    }
-
-  token_info->login_time = now_time;
-
-  nv_add_nvp (req, "_IP", ip);
-  nv_add_nvp (req, "_PORT", port);
-  nv_add_nvp (req, "_ID", id);
-
-
-  /* check if ip is an existing ip */
-  //retval = dbmt_con_search (ip, port, cli_ver);
-
-  return 1;
-}
-
 /*
  *   client ip : client port : dbmt id : pserver pid
  *      15            5           8           5      = 33 + 4 = 37
@@ -2436,35 +3055,60 @@ char *
 ut_token_generate (char *client_ip, char *client_port, char *dbmt_id,
 		   int proc_id, time_t login_time)
 {
-  char sbuf[TOKEN_LENGTH + 1];
-  char token_string[TOKEN_ENC_LENGTH];
-  size_t i, len;
+  /*
+   * The token is an opaque random value, not an encryption of the session
+   * fields: there is nothing in it to decrypt or forge.
+   * The session (ip/port/id, login time, DB logins) is held server-side in the
+   * session map keyed by this token. TOKEN_LENGTH random bytes are emitted as
+   * a hex string, so the printed length (TOKEN_LENGTH * 2) matches the old
+   * token and existing buffers (TOKEN_ENC_LENGTH) are unchanged.
+   */
+  unsigned char rnd[TOKEN_LENGTH];
+  char *token_string;
+  int i;
 
   if ((client_ip == NULL) || (client_port == NULL) || (dbmt_id == NULL))
     {
       return NULL;
     }
-  memset (sbuf, 0, TOKEN_LENGTH + 1);
-  snprintf (sbuf, TOKEN_LENGTH, "%s:%s:%s:%d:%lu", client_ip, client_port,
-	    dbmt_id, proc_id, login_time);
-  len = strlen (sbuf);
-  /* insert padding to checksum part */
-  for (i = len; i < TOKEN_LENGTH; ++i)
+
+  (void) proc_id;
+  (void) login_time;
+
+  if (RAND_bytes (rnd, sizeof (rnd)) != 1)
     {
-      sbuf[i] = '*';
+      return NULL;
     }
-  sbuf[i] = '\0';
 
-  uEncrypt (TOKEN_LENGTH, sbuf, token_string);
+  token_string = (char *) malloc (TOKEN_ENC_LENGTH);
+  if (token_string == NULL)
+    {
+      return NULL;
+    }
 
-  return strdup (token_string);
+  for (i = 0; i < TOKEN_LENGTH; ++i)
+    {
+      sprintf (token_string + i * 2, "%02x", rnd[i]);
+    }
+  token_string[TOKEN_LENGTH * 2] = '\0';
+
+  return token_string;
 }
 
-void
-_accept_connection (nvplist *cli_request, nvplist *cli_response)
+/*
+ * _accept_connection () - create the session of a successful login.
+ *   The token is generated, the session is registered under it, and only
+ *   then is the token put in the response, so a client never gets a token
+ *   without a session behind it.
+ *   return: ERR_NO_ERROR, or an error code with _dbmt_error set; the login
+ *   then fails.
+ */
+int
+_accept_connection (nvplist *cli_request, nvplist *cli_response, char *_dbmt_error)
 {
   char *pstrbuf;
   char *client_ip, *client_port, *client_id, *client_ver;
+  int retval;
 #ifdef WINDOWS
   HANDLE proc_id = (HANDLE) getpid ();
 #else
@@ -2478,20 +3122,40 @@ _accept_connection (nvplist *cli_request, nvplist *cli_response)
   client_id = nv_get_val (cli_request, "id");
   client_ver = nv_get_val (cli_request, "clientver");
 
-  /* generate token and record new connection to file */
-  pstrbuf =
-	  ut_token_generate (client_ip, client_port, client_id, getpid (),
-			     login_time);
-  nv_add_nvp (cli_response, "token", pstrbuf);
-
-  dbmt_con_add (client_ip, client_port, client_ver, client_id);
+  /*
+   * NULL when RAND_bytes () fails (no entropy), when an argument is missing,
+   * or when memory runs out. Never fall back to a weaker token: refuse the
+   * login.
+   */
+  pstrbuf = ut_token_generate (client_ip, client_port, client_id, getpid (),
+			       login_time);
+  if (pstrbuf == NULL)
+    {
+      ut_error_log (cli_request, "failed to generate a session token.");
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s",
+		"Failed to create a session. Please try again.");
+      return ERR_WITH_MSG;
+    }
 
   ut_access_log (cli_request, "before add token into token list.");
-  dbmt_user_new_token_info (client_id, client_ip, client_port, pstrbuf,
-			    proc_id, login_time);
+  retval = dbmt_user_new_token_info (client_id, client_ip, client_port, pstrbuf,
+				     proc_id, login_time);
+  if (retval != ERR_NO_ERROR)
+    {
+      ut_error_log (cli_request, "failed to register the session.");
+      free (pstrbuf);
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s",
+		"Failed to create a session. Please try again.");
+      return ERR_WITH_MSG;
+    }
+
+  /* record the new connection to file */
+  dbmt_con_add (client_ip, client_port, client_ver, client_id);
+
+  nv_add_nvp (cli_response, "token", pstrbuf);
 
   free (pstrbuf);
-  return;
+  return ERR_NO_ERROR;
 }
 
 
@@ -2517,12 +3181,218 @@ _ut_timeval_diff (struct timeval *start, struct timeval *end, int *res_msec)
   *res_msec = sec * 1000 + msec;
 }
 
+INT64
+ut_get_msec_marker (void)
+{
+#if defined (WINDOWS)
+  /*
+   * GetSystemTimeAsFileTime () gives a full 64-bit tick count directly.
+   * FILETIME counts 100 ns intervals since 1601-01-01; 116444736000000000
+   * is that count's value at the Unix epoch (1970-01-01).
+   */
+  FILETIME ft;
+  ULARGE_INTEGER uli;
+
+  GetSystemTimeAsFileTime (&ft);
+  uli.LowPart = ft.dwLowDateTime;
+  uli.HighPart = ft.dwHighDateTime;
+
+  return (INT64) ((uli.QuadPart - 116444736000000000LL) / 10000);
+#else
+  struct timeval tv;
+
+  gettimeofday (&tv, NULL);
+
+  return (INT64) tv.tv_sec * 1000 + (INT64) (tv.tv_usec / 1000);
+#endif
+}
+
+/*
+ * _env_mutex () - the lock behind env_mutex_lock ()/env_mutex_unlock ().
+ *
+ */
+static mutex_t *
+_env_mutex (void)
+{
+  struct env_mutex_holder
+  {
+    mutex_t m;
+
+    env_mutex_holder (void)
+    {
+      mutex_init (m);
+    }
+    ~env_mutex_holder (void)
+    {
+      /* deliberately empty */
+    }
+  };
+  static env_mutex_holder holder;
+
+  return &holder.m;
+}
+
+/*
+ * env_mutex_lock ()/env_mutex_unlock () - the lock run_child_env () holds
+ * while it snapshots the process environment (see cm_server_util.cpp).
+ */
+void
+env_mutex_lock (void)
+{
+  mutex_lock (*_env_mutex ());
+}
+
+void
+env_mutex_unlock (void)
+{
+  mutex_unlock (*_env_mutex ());
+}
+
+/*
+ * _env_key_len () - length of the "KEY" part of a "KEY=VALUE" string
+ *                    (or the whole string, if there is no '=').
+ */
+static size_t
+_env_key_len (const char *kv)
+{
+  const char *eq = strchr (kv, '=');
+
+  return (eq != NULL) ? (size_t) (eq - kv) : strlen (kv);
+}
+
+/*
+ * _env_entry_is_delete () - true if kv is a "KEY=" entry with no value
+ */
+static int
+_env_entry_is_delete (const char *kv)
+{
+  const char *eq = strchr (kv, '=');
+
+  return (eq != NULL) && (eq[1] == '\0');
+}
 
 #if defined(WINDOWS)
+
+/*
+ * _build_env_block () - build a Windows environment block (a sequence of
+ * NUL-terminated "KEY=VALUE" strings, terminated by an extra NUL)
+ */
+static char *
+_build_env_block (const char *const envp[])
+{
+  char *base_block;
+  char *merged_block;
+  const char *p;
+  char *q;
+  size_t merged_size;
+  int extra_count, j;
+
+  env_mutex_lock ();
+
+  base_block = GetEnvironmentStrings ();
+  if (base_block == NULL)
+    {
+      env_mutex_unlock ();
+      return NULL;
+    }
+
+  for (extra_count = 0; envp != NULL && envp[extra_count] != NULL; extra_count++)
+    ;
+
+  /* pass 1: compute the merged block size, skipping any base entry that
+   * envp[] overrides (Windows env var names are case-insensitive) */
+  merged_size = 0;
+  for (p = base_block; *p != '\0'; p += strlen (p) + 1)
+    {
+      size_t key_len = _env_key_len (p);
+      int overridden = 0;
+
+      for (j = 0; j < extra_count; j++)
+	{
+	  if (key_len == _env_key_len (envp[j]) && _strnicmp (p, envp[j], key_len) == 0)
+	    {
+	      overridden = 1;
+	      break;
+	    }
+	}
+
+      if (!overridden)
+	{
+	  merged_size += strlen (p) + 1;
+	}
+    }
+  for (j = 0; j < extra_count; j++)
+    {
+      if (_env_entry_is_delete (envp[j]))
+	{
+	  continue;
+	}
+      merged_size += strlen (envp[j]) + 1;
+    }
+  merged_size += 1;    /* final block-terminating NUL */
+
+  merged_block = (char *) malloc (merged_size);
+  if (merged_block == NULL)
+    {
+      FreeEnvironmentStrings (base_block);
+      env_mutex_unlock ();
+      return NULL;
+    }
+
+  /* pass 2: copy */
+  q = merged_block;
+  for (p = base_block; *p != '\0'; p += strlen (p) + 1)
+    {
+      size_t len = strlen (p);
+      size_t key_len = _env_key_len (p);
+      int overridden = 0;
+
+      for (j = 0; j < extra_count; j++)
+	{
+	  if (key_len == _env_key_len (envp[j]) && _strnicmp (p, envp[j], key_len) == 0)
+	    {
+	      overridden = 1;
+	      break;
+	    }
+	}
+
+      if (!overridden)
+	{
+	  memcpy (q, p, len + 1);
+	  q += len + 1;
+	}
+    }
+  for (j = 0; j < extra_count; j++)
+    {
+      size_t len;
+
+      if (_env_entry_is_delete (envp[j]))
+	{
+	  continue;
+	}
+      len = strlen (envp[j]);
+
+      memcpy (q, envp[j], len + 1);
+      q += len + 1;
+    }
+  *q = '\0';
+
+  FreeEnvironmentStrings (base_block);
+  env_mutex_unlock ();
+
+  return merged_block;
+}
+
+/*
+ * envp (in) : NULL-terminated array of "KEY=VALUE" strings to add to (or
+ *             override in) the child's environment. An entry of the form
+ *             "KEY=" (no value) removes KEY from the child's environment
+ * out_start_time (out, optional) : when non-NULL, filled in with the
+ *            spawned child's process start time.
+ */
 int
-ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
-	      const char *stdin_file, const char *stdout_file,
-	      const char *stderr_file, int *exit_status)
+run_child_env (const char *const argv[], int wait_flag, const char *stdin_file, char *stdout_file,
+	       char *stderr_file, int *exit_status, const char *envp[], long long *out_start_time)
 {
   int new_pid;
   STARTUPINFO start_info;
@@ -2534,10 +3404,20 @@ ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
   HANDLE hStdIn = INVALID_HANDLE_VALUE;
   HANDLE hStdOut = INVALID_HANDLE_VALUE;
   HANDLE hStdErr = INVALID_HANDLE_VALUE;
+  char *env_block = NULL;
 
   if (exit_status != NULL)
     {
       *exit_status = 0;
+    }
+  if (out_start_time != NULL)
+    {
+      /*
+       * Unlike the POSIX build below, this Windows run_child_env () never
+       * hands the child off to any background reaper, so the pid-reuse
+       * race out_start_time exists for cannot happen here; left unfilled.
+       */
+      *out_start_time = -1;
     }
 
   for (i = 0, cmd_arg_len = 0; argv[i]; i++)
@@ -2548,52 +3428,78 @@ ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
   GetStartupInfo (&start_info);
   start_info.wShowWindow = SW_HIDE;
 
+  /*
+   * mirrors the POSIX side: if a redirect the caller explicitly asked for
+   * can't be set up, fail the whole call
+   */
   if (stdin_file)
     {
-      hStdIn =
-	      CreateFile (stdin_file, GENERIC_READ, FILE_SHARE_READ, NULL,
-			  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-      if (hStdIn != INVALID_HANDLE_VALUE)
+      hStdIn = CreateFile (stdin_file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+      if (hStdIn == INVALID_HANDLE_VALUE)
 	{
-	  SetHandleInformation (hStdIn, HANDLE_FLAG_INHERIT,
-				HANDLE_FLAG_INHERIT);
-	  start_info.dwFlags = STARTF_USESTDHANDLES;
-	  start_info.hStdInput = hStdIn;
-	  inherit_flag = TRUE;
+	  return -1;
 	}
+      SetHandleInformation (hStdIn, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+      start_info.dwFlags = STARTF_USESTDHANDLES;
+      start_info.hStdInput = hStdIn;
+      inherit_flag = TRUE;
     }
   if (stdout_file)
     {
       hStdOut =
-	      CreateFile (stdout_file, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-			  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-      if (hStdOut != INVALID_HANDLE_VALUE)
+	      CreateFile (stdout_file, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      if (hStdOut == INVALID_HANDLE_VALUE)
 	{
-	  SetHandleInformation (hStdOut, HANDLE_FLAG_INHERIT,
-				HANDLE_FLAG_INHERIT);
-	  start_info.dwFlags = STARTF_USESTDHANDLES;
-	  start_info.hStdOutput = hStdOut;
-	  inherit_flag = TRUE;
+	  if (hStdIn != INVALID_HANDLE_VALUE)
+	    {
+	      CloseHandle (hStdIn);
+	    }
+	  return -1;
 	}
+      SetHandleInformation (hStdOut, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+      start_info.dwFlags = STARTF_USESTDHANDLES;
+      start_info.hStdOutput = hStdOut;
+      inherit_flag = TRUE;
     }
   if (stderr_file)
     {
       hStdErr =
-	      CreateFile (stderr_file, GENERIC_WRITE,
-			  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-			  NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-      if (hStdErr != INVALID_HANDLE_VALUE)
+	      CreateFile (stderr_file, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+			  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      if (hStdErr == INVALID_HANDLE_VALUE)
 	{
-	  SetHandleInformation (hStdErr, HANDLE_FLAG_INHERIT,
-				HANDLE_FLAG_INHERIT);
-	  start_info.dwFlags = STARTF_USESTDHANDLES;
-	  start_info.hStdError = hStdErr;
-	  inherit_flag = TRUE;
+	  if (hStdIn != INVALID_HANDLE_VALUE)
+	    {
+	      CloseHandle (hStdIn);
+	    }
+	  if (hStdOut != INVALID_HANDLE_VALUE)
+	    {
+	      CloseHandle (hStdOut);
+	    }
+	  return -1;
 	}
+      SetHandleInformation (hStdErr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+      start_info.dwFlags = STARTF_USESTDHANDLES;
+      start_info.hStdError = hStdErr;
+      inherit_flag = TRUE;
     }
 
-  res = CreateProcess (bin_path, cmd_arg, NULL, NULL, inherit_flag,
-		       CREATE_NO_WINDOW, NULL, NULL, &start_info, &proc_info);
+  if (envp != NULL)
+    {
+      /* NULL on failure just means "inherit parent env unchanged", same as run_child () */
+      env_block = _build_env_block (envp);
+    }
+
+  /* env_block is an ANSI block from GetEnvironmentStrings (), so we must NOT pass
+   * CREATE_UNICODE_ENVIRONMENT here. */
+  res =
+	  CreateProcess (argv[0], cmd_arg, NULL, NULL, inherit_flag, CREATE_NO_WINDOW, env_block, NULL, &start_info,
+			 &proc_info);
+
+  if (env_block != NULL)
+    {
+      free (env_block);
+    }
 
   if (hStdIn != INVALID_HANDLE_VALUE)
     {
@@ -2618,8 +3524,8 @@ ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
   if (wait_flag)
     {
       DWORD status = 0;
-      //WaitForSingleObject (proc_info.hProcess, INFINITE);
-      //GetExitCodeProcess (proc_info.hProcess, &status);
+      WaitForSingleObject (proc_info.hProcess, INFINITE);
+      GetExitCodeProcess (proc_info.hProcess, &status);
       if (exit_status != NULL)
 	{
 	  *exit_status = status;
@@ -2635,77 +3541,339 @@ ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
       return new_pid;
     }
 }
-#else
+
+#else /* !WINDOWS */
+
+/*
+ * _merge_envp () - build a NULL-terminated envp[] array (for execve ()).
+ */
+static char **
+_merge_envp (const char *const envp[])
+{
+  extern char **environ;
+  int base_count, extra_count, i, j;
+  int total_count = 0;
+  char **merged;
+
+  env_mutex_lock ();
+
+  for (base_count = 0; environ != NULL && environ[base_count] != NULL; base_count++)
+    ;
+  for (extra_count = 0; envp != NULL && envp[extra_count] != NULL; extra_count++)
+    ;
+
+  merged = (char **) malloc (sizeof (char *) * (base_count + extra_count + 1));
+  if (merged == NULL)
+    {
+      LOG_ERROR ("malloc () for execve failed (critical), try execv () instead");
+      env_mutex_unlock ();
+      return NULL;
+    }
+
+  for (i = 0; i < base_count; i++)
+    {
+      size_t key_len = _env_key_len (environ[i]);
+      int overridden = 0;
+
+      for (j = 0; j < extra_count; j++)
+	{
+	  if (key_len == _env_key_len (envp[j]) && strncmp (environ[i], envp[j], key_len) == 0)
+	    {
+	      overridden = 1;
+	      break;
+	    }
+	}
+
+      if (!overridden)
+	{
+	  merged[total_count] = strdup (environ[i]);
+	  if (merged[total_count] == NULL)
+	    {
+	      goto error;
+	    }
+	  total_count++;
+	}
+    }
+
+  for (j = 0; j < extra_count; j++)
+    {
+      if (_env_entry_is_delete (envp[j]))
+	{
+	  continue;
+	}
+
+      merged[total_count] = strdup (envp[j]);
+      if (merged[total_count] == NULL)
+	{
+	  goto error;
+	}
+      total_count++;
+    }
+
+  merged[total_count] = NULL;
+
+  env_mutex_unlock ();
+  return merged;
+
+error:
+  merged[total_count] = NULL;
+  for (i = 0; merged[i] != NULL; i++)
+    {
+      free (merged[i]);
+    }
+  free (merged);
+  env_mutex_unlock ();
+  LOG_ERROR ("strdup () for execve failed (critical), try execv () instead");
+  return NULL;
+}
+
+static void
+_free_envp (char **merged)
+{
+  int i;
+
+  if (merged == NULL)
+    {
+      return;
+    }
+  for (i = 0; merged[i] != NULL; i++)
+    {
+      free (merged[i]);
+    }
+  free (merged);
+}
+
+/*
+ * _reap_child_async (), blocks in waitpid () for exactly one child
+ */
+static void *
+_reap_child_async (void *arg)
+{
+  pid_t *pid_ptr = (pid_t *) arg;
+  pid_t pid = *pid_ptr;
+
+  delete pid_ptr;
+
+  while (waitpid (pid, NULL, 0) < 0 && errno == EINTR)
+    ;
+  return NULL;
+}
+
+/*
+ * ut_get_proc_stat_fields () - the single implementation of the
+ *   /proc/<pid>/stat parse: one fopen ()/fgets () of the file hands
+ *   back field 3 (state) and/or field 22 (starttime), whichever of
+ *   state_out/start_time_out the caller passes non-NULL.
+ */
 int
-ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
-	      const char *stdin_file, const char *stdout_file,
-	      const char *stderr_file, int *exit_status)
+ut_get_proc_stat_fields (pid_t pid, char *state_out, long long *start_time_out)
+{
+  char path[64];
+  char buf[1024];
+  FILE *fp;
+  char *p, *tok, *saveptr;
+  int field;
+
+  if (pid <= 0)
+    {
+      return -1;
+    }
+
+  snprintf (path, sizeof (path), "/proc/%d/stat", (int) pid);
+  fp = fopen (path, "r");
+  if (fp == NULL)
+    {
+      return -1;
+    }
+  if (fgets (buf, sizeof (buf), fp) == NULL)
+    {
+      fclose (fp);
+      return -1;
+    }
+  fclose (fp);
+
+  p = strrchr (buf, ')');
+  if (p == NULL)
+    {
+      return -1;
+    }
+
+  tok = STRTOK (p + 1, " ", &saveptr);
+  if (tok == NULL)
+    {
+      return -1;
+    }
+  if (state_out != NULL)
+    {
+      *state_out = tok[0];
+    }
+
+  if (start_time_out != NULL)
+    {
+      /*
+       * tok is field 3 (just captured above); keep tokenizing the same
+       * saveptr forward to field 22, rather than re-reading the file.
+       */
+      for (field = 3; tok != NULL && field < 22; field++)
+	{
+	  tok = STRTOK (NULL, " ", &saveptr);
+	}
+      if (tok == NULL || sscanf (tok, "%lld", start_time_out) != 1)
+	{
+	  return -1;
+	}
+    }
+
+  return 0;
+}
+
+/*
+ * ut_get_proc_start_time () - pid's /proc/<pid>/stat starttime field
+ *   (field 22); a thin wrapper over ut_get_proc_stat_fields ().
+ */
+long long
+ut_get_proc_start_time (pid_t pid)
+{
+  long long start_time;
+
+  if (ut_get_proc_stat_fields (pid, NULL, &start_time) != 0)
+    {
+      return -1;
+    }
+  return start_time;
+}
+
+int
+run_child_env (const char *const argv[], int wait_flag, const char *stdin_file, char *stdout_file,
+	       char *stderr_file, int *exit_status, const char *envp[], long long *out_start_time)
 {
   int pid;
+  char **merged_envp = NULL;
 
   if (exit_status != NULL)
     {
       *exit_status = 0;
     }
+  if (out_start_time != NULL)
+    {
+      *out_start_time = -1;
+    }
 
-  if (wait_flag)
+  if (envp != NULL)
     {
-      signal (SIGCHLD, SIG_DFL);
+      merged_envp = _merge_envp (envp);
     }
-  else
-    {
-      signal (SIGCHLD, SIG_IGN);
-    }
+
   pid = fork ();
   if (pid == 0)
     {
-      FILE *fp;
+      /*
+       * use async-signal-safe system calls only
+       */
+      int fd;
 
       close_all_fds (3);
 
       if (stdin_file != NULL)
 	{
-	  fp = fopen (stdin_file, "r");
-	  if (fp != NULL)
+	  fd = open (stdin_file, O_RDONLY);
+	  if (fd >= 0)
 	    {
-	      dup2 (fileno (fp), 0);
-	      fclose (fp);
+	      dup2 (fd, 0);
+	      close (fd);
+	    }
+	  else
+	    {
+	      _exit (126);
 	    }
 	}
       if (stdout_file != NULL)
 	{
-	  unlink (stdout_file);
-	  fp = fopen (stdout_file, "w");
-	  if (fp != NULL)
+	  fd = open (stdout_file, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+	  if (fd >= 0)
 	    {
-	      dup2 (fileno (fp), 1);
-	      fclose (fp);
+	      dup2 (fd, 1);
+	      close (fd);
+	    }
+	  else
+	    {
+	      _exit (126);
 	    }
 	}
       if (stderr_file != NULL)
 	{
-	  unlink (stderr_file);
-	  fp = fopen (stderr_file, "w");
-	  if (fp != NULL)
+	  fd = open (stderr_file, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+	  if (fd >= 0)
 	    {
-	      dup2 (fileno (fp), 2);
-	      fclose (fp);
+	      dup2 (fd, 2);
+	      close (fd);
+	    }
+	  else
+	    {
+	      _exit (126);
 	    }
 	}
 
-      execv (bin_path, (char *const *) argv);
-      exit (0);
+      if (merged_envp != NULL)
+	{
+	  execve ((const char *) argv[0], (char *const *) argv, merged_envp);
+	}
+      else
+	{
+	  execv ((const char *) argv[0], (char *const *) argv);
+	}
+      _exit (127); /* when execve () failed, just _exit () immediately */
     }
+
+  _free_envp (merged_envp);
 
   if (pid < 0)
     {
       return -1;
     }
 
+  if (out_start_time != NULL)
+    {
+      /*
+       * Read now, in the parent, before pid can be handed to any waiter below
+       */
+      *out_start_time = ut_get_proc_start_time ((pid_t) pid);
+    }
+
   if (wait_flag)
     {
       int status = 0;
-      waitpid (pid, &status, 0);
+      int wait_rc;
+
+      while ((wait_rc = waitpid (pid, &status, 0)) < 0 && errno == EINTR)
+	;
+      if (wait_rc < 0)
+	{
+	  if (errno == ECHILD)
+	    {
+	      return -1;
+	    }
+
+	  /*
+	   * fork () still succeeded, so pid is a real child
+	   * that has not been reaped here - hand it off to _reap_child_async (),
+	   * the same way the wait_flag == false branch below already does, so it does
+	   * not linger as a zombie.
+	   */
+	  pid_t *reap_pid = new pid_t (pid);
+	  pthread_t reaper;
+
+	  if (pthread_create (&reaper, NULL, _reap_child_async, reap_pid) == 0)
+	    {
+	      pthread_detach (reaper);
+	    }
+	  else
+	    {
+	      delete reap_pid;
+	    }
+	  return -1;
+	}
+
       if (exit_status != NULL)
 	{
 	  *exit_status = status;
@@ -2714,6 +3882,19 @@ ut_run_child (const char *bin_path, const char *const argv[], int wait_flag,
     }
   else
     {
+      pthread_t reaper;
+      pid_t *reap_pid = new pid_t (pid);
+
+      if (pthread_create (&reaper, NULL, _reap_child_async, reap_pid) == 0)
+	{
+	  pthread_detach (reaper);
+	}
+      else
+	{
+	  delete reap_pid;
+	  while (waitpid (pid, NULL, 0) < 0 && errno == EINTR)
+	    ;
+	}
       return pid;
     }
 }
@@ -2942,139 +4123,6 @@ IsValidUserName (const char *pUserName)
 	}
     }
   return 0;
-}
-
-int
-ut_get_token_active_time (time_t *active_time)
-{
-  char file_name[PATH_MAX];
-  char line_buf[LINE_MAX];
-  FILE *in_file = NULL;
-  char *pos = NULL;
-
-  file_name[0] = '\0';
-  line_buf[0] = '\0';
-
-  conf_get_dbmt_file (FID_DBMT_CONF, file_name);
-  in_file = fopen (file_name, "r");
-
-  if (in_file == NULL)
-    {
-      return 1;
-    }
-
-  *active_time = 0;
-  while (fgets (line_buf, LINE_MAX, in_file) != NULL)
-    {
-      if (line_buf[0] == '#')
-	{
-	  continue;
-	}
-
-      if ((pos = strstr (line_buf, "=")) != NULL &&
-	  strstr (line_buf, "token_active_time") != NULL)
-	{
-	  char tmp_str[LINE_MAX];
-	  strcpy (tmp_str, pos + 1);
-
-	  *active_time = atoi (tmp_str);
-
-	  break;
-	}
-    }
-  fclose (in_file);
-
-  if (*active_time == 0)
-    {
-      *active_time = 7200;
-    }
-
-  return 0;
-}
-
-int
-ut_validate_auth (nvplist *req)
-{
-  T_USER_AUTH auth_task = 0;
-  T_USER_AUTH auth_user = 0;
-  T_DBMT_USER dbmt_user;
-  T_DBMT_USER_AUTHINFO *auth_info = NULL;
-  char *task = NULL;
-  char *user_id = NULL;
-  char dbmt_error[DBMT_ERROR_MSG_SIZE];
-  int num_authinfo = 0;
-  int i = 0;            // loop var
-
-  dbmt_error[0] = '\0';
-
-  task = nv_get_val (req, "task");
-  user_id = nv_get_val (req, "_ID");
-
-  if (task == NULL)
-    {
-      return 0;
-    }
-
-  if (!strcmp (task, "login") || !strcmp (task, "getcmsenv"))
-    {
-      return 1;
-    }
-
-  if (user_id == NULL)
-    {
-      return 0;
-    }
-
-  if (ut_get_task_info (task, NULL, NULL, &auth_task) == 0)
-    {
-      // As the task doesn't exist, this failure will be checked in next step.
-      return 1;
-    }
-
-  if (dbmt_user_read (&dbmt_user, dbmt_error) != ERR_NO_ERROR)
-    {
-      return 0;
-    }
-
-  for (i = 0; i < dbmt_user.num_dbmt_user; ++i)
-    {
-      if (!strcmp (dbmt_user.user_info[i].user_name, user_id))
-	{
-	  auth_info = dbmt_user.user_info[i].authinfo;
-	  num_authinfo = dbmt_user.user_info[i].num_authinfo;
-	  break;
-	}
-    }
-
-  for (i = 0; i < num_authinfo; ++i)
-    {
-      if (!strcmp (auth_info[i].domain, "user_auth"))
-	{
-	  auth_user = atoi (auth_info[i].auth);
-	  break;
-	}
-    }
-
-  // assign default authority to old users.
-  if (auth_user == 0)
-    {
-      if (!strcmp (user_id, "admin"))
-	{
-	  auth_user = AU_ADMIN;
-	}
-      else
-	{
-	  auth_user = ALL_AUTHORITY;
-	}
-    }
-
-  if (auth_user == AU_ADMIN)
-    {
-      return 1;
-    }
-
-  return (auth_user & auth_task) ? 1 : 0;
-
 }
 
 static int
@@ -3721,6 +4769,77 @@ ut_record_cubrid_utility_log_stdout (const char *msg)
   return 0;
 }
 
+int
+is_positive_number (const char *str)
+{
+  char *endptr;
+  long num;
+
+  if (str == NULL)
+    {
+      return 0;
+    }
+
+  errno = 0;
+  num = strtol (str, &endptr, 10);
+  if (errno == ERANGE || (endptr != NULL && strlen (endptr) > 0) || num <= 0 || num > INT_MAX)
+    {
+      return 0;
+    }
+
+  return (int) num;
+}
+
+int
+gen_tempfile_path (char *tempfile, const char *tempdir, const char *prefix, int task_code, size_t size)
+{
+  static atomic_counter_t seq = 0;
+  time_t now;
+  long tid;
+  int ret = -1;
+  int myseq = ATOMIC_FETCH_ADD1 (seq);
+
+  if (tempfile == NULL)
+    {
+      return -1;
+    }
+
+  tempfile[0] = '\0';
+
+  if (tempdir == NULL || size < 1)
+    {
+      return -1;
+    }
+
+#if defined (WINDOWS)
+  tid = GetCurrentThreadId ();
+#else
+  tid = (long) (intptr_t) pthread_self ();
+#endif
+
+  now = time (NULL);
+
+  ret = snprintf (tempfile, size - 1, "%s/%s_%03d_%ld_%ld_%d", tempdir, prefix ? prefix : "", task_code,
+		  (long) now, tid, myseq);
+
+  return (ret > 0 && ret < (int) (size - 1)) ? 0 : -1;
+}
+
+/*
+ * ut_child_exited_ok () - true if a run_child_env () (wait_flag ==
+ * RUN_FOREGROUND) child both ran to completion and exited with status 0.
+ */
+
+bool
+ut_child_exited_ok (int exit_code)
+{
+#if defined(WINDOWS)
+  return (exit_code == 0);
+#else
+  return (WIFEXITED (exit_code) != 0 && WEXITSTATUS (exit_code) == 0);
+#endif
+}
+
 #if defined (WINDOWS)
 static bool
 delete_directory (const std::string &rawPath)
@@ -3759,6 +4878,22 @@ delete_directory (const std::string &rawPath)
 static bool
 delete_directory (const std::string &path)
 {
+  struct stat path_stat;
+
+  if (lstat (path.c_str (), &path_stat) != 0)
+    {
+      return false;
+    }
+
+  /*
+   * not a directory (a regular file, a symbolic link, ...): remove it
+   * like "rm -rf" did. a symbolic link is removed itself, not its target.
+   */
+  if (!S_ISDIR (path_stat.st_mode))
+    {
+      return (unlink (path.c_str ()) == 0);
+    }
+
   DIR *dir = opendir (path.c_str ());
   if (!dir)
     {
@@ -3864,6 +4999,28 @@ is_invalid_filename_with_msg (const char *filename, char *dbmt_error)
   return ret;
 }
 
+/*
+ * has_stream_name () - Windows: a ':' anywhere but after the drive letter
+ *   names an NTFS alternate data stream (cm.pass:x, cm.pass::$DATA), another
+ *   way to reach a file that a plain path comparison does not catch. No
+ *   valid file name has one. Always false elsewhere.
+ */
+static bool
+has_stream_name (const std::string &path)
+{
+#if defined (WINDOWS)
+  size_t pos = path.find (':');
+
+  if (pos == 1 && std::isalpha ((unsigned char) path[0]))
+    {
+      pos = path.find (':', 2);
+    }
+  return pos != std::string::npos;
+#else
+  return false;
+#endif
+}
+
 bool
 is_valid_filename (const char *filename, std::string &expanded_path)
 {
@@ -3884,6 +5041,11 @@ is_valid_filename (const char *filename, std::string &expanded_path)
     }
 
   if (expanded_path.find_first_of (FORBIDDEN_CHARS) != std::string::npos)
+    {
+      return false;
+    }
+
+  if (has_stream_name (expanded_path))
     {
       return false;
     }
@@ -3912,6 +5074,11 @@ is_valid_filename (const char *filename)
     }
 
   if (expanded_path.find_first_of (FORBIDDEN_CHARS) != std::string::npos)
+    {
+      return false;
+    }
+
+  if (has_stream_name (expanded_path))
     {
       return false;
     }
@@ -4170,6 +5337,369 @@ is_subpath (const char *allowd_path, const char *path)
   return clean_user.rfind (clean_allowed, 0) == 0;
 }
 
+/*
+ * Protected files.
+ *
+ * These files hold CMS user passwords and authorities, DB passwords or the
+ * TLS private key. No file task may read or write them, whatever the
+ * caller's authority (admin included); the server itself reaches them only
+ * through its own code, never through a path taken from a request. The files
+ * named after the TLS key and certificate (<name>.<anything>, the work files
+ * of a replacement) are protected too, see is_tls_work_file ().
+ */
+static std::vector<std::string>
+protected_files (void)
+{
+  static const T_DBMT_FILE_ID fids[] =
+  {
+    FID_DBMT_PASS,		/* cm.pass */
+    FID_DBMT_CUBRID_PASS,	/* cmdb.pass */
+    FID_CONN_LIST,		/* conlist */
+    FID_AUTO_JOBS_CONF,		/* autojobs.conf */
+    FID_AUTO_EXECQUERY_CONF	/* autoexecquery.conf */
+  };
+  std::vector<std::string> files;
+  char buf[PATH_MAX];
+
+  for (size_t i = 0; i < sizeof (fids) / sizeof (fids[0]); i++)
+    {
+      buf[0] = '\0';
+      if (conf_get_dbmt_file (fids[i], buf) != NULL && buf[0] != '\0')
+	{
+	  files.push_back (buf);
+	}
+    }
+  if (sco.szSSLKey[0] != '\0')
+    {
+      files.push_back (sco.szSSLKey);
+    }
+  if (sco.szSSLCertificate[0] != '\0')
+    {
+      files.push_back (sco.szSSLCertificate);
+    }
+
+  return files;
+}
+
+#if defined (WINDOWS)
+/*
+ * win_final_path () - the name Windows itself gives the existing file or
+ *   directory `path`: long names instead of 8.3 short names, the real case,
+ *   trailing dots and spaces dropped, and symbolic links and junctions
+ *   resolved. Without the "\\?\" prefix that GetFinalPathNameByHandle adds.
+ */
+static bool
+win_final_path (const std::string &path, std::string &final_path)
+{
+  char buf[PATH_MAX];
+  HANDLE h;
+  DWORD n;
+
+  /* access 0: only query the name; FILE_FLAG_BACKUP_SEMANTICS opens directories */
+  h = CreateFileA (path.c_str (), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+		   OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (h == INVALID_HANDLE_VALUE)
+    {
+      return false;
+    }
+  n = GetFinalPathNameByHandleA (h, buf, sizeof (buf), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  CloseHandle (h);
+  if (n == 0 || n >= sizeof (buf))
+    {
+      return false;
+    }
+
+  final_path = buf;
+  if (final_path.compare (0, 8, "\\\\?\\UNC\\") == 0)
+    {
+      final_path = "\\" + final_path.substr (7);
+    }
+  else if (final_path.compare (0, 4, "\\\\?\\") == 0)
+    {
+      final_path = final_path.substr (4);
+    }
+  return true;
+}
+#endif
+
+/*
+ * resolve_path () - the path the operating system really opens, so that
+ *   another spelling cannot stand in for a protected file or for a program
+ *   directory ($CUBRID/bin, lib, java).
+ *   Linux: symbolic links resolved (realpath).
+ *   Windows: the name the file system gives the file (win_final_path ()), so
+ *   that 8.3 short names (CM~1.PAS), trailing dots or spaces (cm.pass.), case,
+ *   symbolic links and junctions all map to the same path.
+ *   A path that does not exist yet (a file about to be written) is resolved
+ *   through its parent directory. Returns the path unchanged when it cannot be
+ *   resolved.
+ */
+static std::string
+resolve_path (const std::string &path)
+{
+#if defined (WINDOWS)
+  char full[PATH_MAX];
+  DWORD n;
+  std::string final_path;
+
+  /* separators, "." and ".." and the trailing dots/spaces of the last part */
+  n = GetFullPathNameA (path.c_str (), sizeof (full), full, NULL);
+  if (n == 0 || n >= sizeof (full))
+    {
+      return path;
+    }
+  std::string normalized = full;
+
+  if (win_final_path (normalized, final_path))
+    {
+      return final_path;
+    }
+
+  size_t pos = normalized.find_last_of ('\\');
+  if (pos != std::string::npos && pos > 0)
+    {
+      std::string parent = normalized.substr (0, pos);
+      std::string last = normalized.substr (pos + 1);
+
+      if (parent.size () == 2 && parent[1] == ':')
+	{
+	  parent += '\\';		/* "C:" is the current directory of C:, not its root */
+	}
+      /* Windows drops them when it creates the file */
+      while (!last.empty () && (last.back () == '.' || last.back () == ' '))
+	{
+	  last.pop_back ();
+	}
+      if (win_final_path (parent, final_path))
+	{
+	  if (final_path.empty () || final_path.back () != '\\')
+	    {
+	      final_path += '\\';
+	    }
+	  return final_path + last;
+	}
+    }
+  return normalized;
+#else
+  char buf[PATH_MAX];
+
+  if (realpath (path.c_str (), buf) != NULL)
+    {
+      return std::string (buf);
+    }
+
+  size_t pos = path.find_last_of ('/');
+  if (pos != std::string::npos && pos > 0)
+    {
+      std::string parent = path.substr (0, pos);
+      if (realpath (parent.c_str (), buf) != NULL)
+	{
+	  return std::string (buf) + path.substr (pos);
+	}
+    }
+  return path;
+#endif
+}
+
+/* the same path after normalization (is_subpath () both ways) */
+static bool
+is_same_path (const std::string &a, const std::string &b)
+{
+  return is_subpath (a.c_str (), b.c_str ()) && is_subpath (b.c_str (), a.c_str ());
+}
+
+/* split `path` into its directory and its last part */
+static bool
+split_dir_name (const std::string &path, std::string &dir, std::string &name)
+{
+#if defined (WINDOWS)
+  size_t pos = path.find_last_of ("/\\");
+#else
+  size_t pos = path.find_last_of ('/');
+#endif
+
+  if (pos == std::string::npos)
+    {
+      return false;
+    }
+  dir = path.substr (0, (pos == 0) ? 1 : pos);
+  name = path.substr (pos + 1);
+  return !name.empty ();
+}
+
+/* `name` is `prefix` followed by at least one character (case-insensitive on Windows) */
+static bool
+name_starts_with (const std::string &name, const std::string &prefix)
+{
+  if (name.size () <= prefix.size ())
+    {
+      return false;
+    }
+#if defined (WINDOWS)
+  return _strnicmp (name.c_str (), prefix.c_str (), prefix.size ()) == 0;
+#else
+  return name.compare (0, prefix.size (), prefix) == 0;
+#endif
+}
+
+/*
+ * is_tls_work_file () - `path` (expanded) is a file named after the TLS key
+ *   or certificate, in the same directory: <name>.<anything>, for example
+ *   cm_ssl_cert.key.tmp-<suffix> (the new key) and cm_ssl_cert.key.old-<suffix>
+ *   (the previous key) that cm_ssl_cert.cpp writes while it replaces the key
+ *   pair (CBRD-27829). They hold private keys, and a replacement runs while
+ *   file tasks are served, so they are protected like the key itself.
+ */
+static bool
+is_tls_work_file (const std::string &path)
+{
+  const char *tls_files[] = { sco.szSSLKey, sco.szSSLCertificate };
+  std::string candidates[] = { path, resolve_path (path) };
+
+  for (size_t i = 0; i < sizeof (tls_files) / sizeof (tls_files[0]); i++)
+    {
+      std::string tls_dir, tls_name;
+
+      if (tls_files[i][0] == '\0' || !split_dir_name (tls_files[i], tls_dir, tls_name))
+	{
+	  continue;
+	}
+      std::string prefix = tls_name + ".";
+      std::string tls_dir_resolved = resolve_path (tls_dir);
+
+      for (size_t j = 0; j < sizeof (candidates) / sizeof (candidates[0]); j++)
+	{
+	  std::string dir, name;
+
+	  if (!split_dir_name (candidates[j], dir, name) || !name_starts_with (name, prefix))
+	    {
+	      continue;
+	    }
+	  if (is_same_path (dir, tls_dir) || is_same_path (resolve_path (dir), tls_dir_resolved))
+	    {
+	      return true;
+	    }
+	}
+    }
+  return false;
+}
+
+/* `path` (expanded) is one of the protected files */
+static bool
+is_protected_file (const std::string &path)
+{
+  std::vector<std::string> files = protected_files ();
+  std::string resolved = resolve_path (path);
+
+  for (size_t i = 0; i < files.size (); i++)
+    {
+      if (is_same_path (files[i], path) || is_same_path (resolve_path (files[i]), resolved))
+	{
+	  return true;
+	}
+    }
+  return is_tls_work_file (path);
+}
+
+/* a protected file is `dir` (expanded) itself or somewhere under it */
+static bool
+contains_protected_file (const std::string &dir)
+{
+  std::vector<std::string> files = protected_files ();
+  std::string resolved = resolve_path (dir);
+
+  for (size_t i = 0; i < files.size (); i++)
+    {
+      if (is_subpath (dir.c_str (), files[i].c_str ())
+	  || is_subpath (resolved.c_str (), resolve_path (files[i]).c_str ()))
+	{
+	  return true;
+	}
+    }
+  return false;
+}
+
+/*
+ * Program directories of CUBRID: no file task may write, empty or delete
+ * anything in them. They hold the executables (bin), the shared libraries
+ * (lib) and the jars of the PL server (java); overwriting one, even with
+ * text, can stop the engine or the PL server from starting.
+ */
+static const char *const cubrid_program_dirs[] = { "bin", "lib", "java" };
+
+/* `path` (expanded) is $CUBRID/<dir> or under it */
+static bool
+is_under_cubrid_dir (const std::string &path, const char *dir)
+{
+  std::string top = std::string (sco.szCubrid) + "/" + dir;
+
+  return is_subpath (top.c_str (), path.c_str ())
+	 || is_subpath (resolve_path (top).c_str (), resolve_path (path).c_str ());
+}
+
+/*
+ * is_under_cubrid_program_dir () - `path` (expanded) is one of the program
+ *   directories ($CUBRID/bin, lib, java) or under it. Returns that
+ *   directory's name, or NULL.
+ */
+static const char *
+is_under_cubrid_program_dir (const std::string &path)
+{
+  for (size_t i = 0; i < sizeof (cubrid_program_dirs) / sizeof (cubrid_program_dirs[0]); i++)
+    {
+      if (is_under_cubrid_dir (path, cubrid_program_dirs[i]))
+	{
+	  return cubrid_program_dirs[i];
+	}
+    }
+  return NULL;
+}
+
+/*
+ * overlaps_cubrid_program_dir () - a program directory is `dir` (expanded)
+ *   itself, under it, or above it (so a recursive copy into or a delete of
+ *   `dir` would reach it). Returns that directory's name, or NULL.
+ */
+static const char *
+overlaps_cubrid_program_dir (const std::string &dir)
+{
+  for (size_t i = 0; i < sizeof (cubrid_program_dirs) / sizeof (cubrid_program_dirs[0]); i++)
+    {
+      std::string top = std::string (sco.szCubrid) + "/" + cubrid_program_dirs[i];
+
+      if (is_under_cubrid_dir (dir, cubrid_program_dirs[i])
+	  || is_subpath (dir.c_str (), top.c_str ())
+	  || is_subpath (resolve_path (dir).c_str (), resolve_path (top).c_str ()))
+	{
+	  return cubrid_program_dirs[i];
+	}
+    }
+  return NULL;
+}
+
+static void
+set_path_error (char *_dbmt_error, const char *reason, const char *path)
+{
+  std::string origin_path = path ? path : "(NULL)";
+
+  std::replace (origin_path.begin (), origin_path.end (), '%', '*');
+  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s: %s", reason, origin_path.c_str ());
+}
+
+/* "writing under $CUBRID/<dir> is not allowed: <path>" */
+static void
+set_program_dir_error (char *_dbmt_error, const char *dir, const char *path)
+{
+  std::string reason = std::string ("writing under $CUBRID/") + dir + " is not allowed";
+
+  set_path_error (_dbmt_error, reason.c_str (), path);
+}
+
+/*
+ * is_authorized_filename () - the path is under $CUBRID or $CUBRID_DATABASES
+ * and is not a protected file (cm.pass, cmdb.pass, conlist, autojobs.conf,
+ * autoexecquery.conf, the TLS key and certificate). For every file task.
+ */
 bool
 is_authorized_filename (const char *path, char *_dbmt_error)
 {
@@ -4181,19 +5711,86 @@ is_authorized_filename (const char *path, char *_dbmt_error)
       return false;
     }
 
-  if (is_subpath (sco.szCubrid, expanded_path.c_str ()) || is_subpath (sco.szCubrid_databases, expanded_path.c_str ()))
+  if (!is_subpath (sco.szCubrid, expanded_path.c_str ())
+      && !is_subpath (sco.szCubrid_databases, expanded_path.c_str ()))
     {
-      return true;
+      std::string origin_path = path;
+      std::string allowed_path = std::string (sco.szCubrid) + ", " + sco.szCubrid_databases;
+
+      std::replace (origin_path.begin (), origin_path.end (), '%', '*');
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "path is not authorized (allowed paths are %s): %s",
+		allowed_path.c_str (), origin_path.c_str ());
+      return false;
     }
 
-  std::string origin_path = path;
-  std::string allowed_path = std::string (sco.szCubrid) + ", " + sco.szCubrid_databases;
+  if (is_protected_file (expanded_path))
+    {
+      set_path_error (_dbmt_error, "access to a protected file is not allowed", path);
+      return false;
+    }
 
-  std::replace (origin_path.begin (), origin_path.end (), '%', '*');
-  snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "path is not authorized (allowed paths are %s): %s",
-	    allowed_path.c_str (), origin_path.c_str ());
+  return true;
+}
 
-  return false;
+/*
+ * is_authorized_write_filename () - as above, and not under a program
+ * directory ($CUBRID/bin, lib, java). For tasks that write, truncate or
+ * delete a file (writeandsaveconf, writeprivatedata, resetlog, removelog).
+ */
+bool
+is_authorized_write_filename (const char *path, char *_dbmt_error)
+{
+  std::string expanded_path;
+  const char *program_dir;
+
+  if (!is_authorized_filename (path, _dbmt_error))
+    {
+      return false;
+    }
+
+  /* is_authorized_filename () has already validated and expanded it */
+  (void) is_valid_filename (path, expanded_path);
+  if ((program_dir = is_under_cubrid_program_dir (expanded_path)) != NULL)
+    {
+      set_program_dir_error (_dbmt_error, program_dir, path);
+      return false;
+    }
+
+  return true;
+}
+
+/*
+ * is_authorized_dirname () - as is_authorized_filename (), and no protected
+ * file under the directory; with FOR_WRITE, the directory must also not
+ * overlap a program directory ($CUBRID/bin, lib, java). For tasks that copy
+ * or delete a directory tree.
+ */
+bool
+is_authorized_dirname (const char *path, T_DIR_ACCESS access, char *_dbmt_error)
+{
+  std::string expanded_path;
+  const char *program_dir;
+
+  if (!is_authorized_filename (path, _dbmt_error))
+    {
+      return false;
+    }
+
+  (void) is_valid_filename (path, expanded_path);
+  if (contains_protected_file (expanded_path))
+    {
+      set_path_error (_dbmt_error, "the directory contains a protected file", path);
+      return false;
+    }
+
+  if (access == FOR_WRITE
+      && (program_dir = overlaps_cubrid_program_dir (expanded_path)) != NULL)
+    {
+      set_program_dir_error (_dbmt_error, program_dir, path);
+      return false;
+    }
+
+  return true;
 }
 
 bool
@@ -4313,36 +5910,3 @@ get_proc_comm (const std::string &pid, std::string &comm)
   return true;
 }
 
-bool
-setenv_using_putenv_fmt (const std::string &nameValue, int overwrite)
-{
-  size_t eqPos = nameValue.find ('=');
-
-  if (eqPos == std::string::npos)
-    {
-      return false;
-    }
-
-  std::string name = nameValue.substr (0, eqPos);
-  std::string value = nameValue.substr (eqPos + 1);
-
-  if (name.empty ())
-    {
-      return false;
-    }
-
-#if defined(WINDOWS)
-  errno_t err = _putenv_s (name.c_str (), value.c_str ());
-  if (err != 0)
-    {
-      return false;
-    }
-#else
-  if (setenv (name.c_str (), value.c_str (), overwrite) != 0)
-    {
-      return false;
-    }
-#endif
-
-  return true;
-}

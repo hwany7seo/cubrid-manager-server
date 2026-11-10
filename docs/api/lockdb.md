@@ -2,13 +2,18 @@
 
 Runs lockdb utility.
 
+Permissions required to run this task: none (any logged-in user)
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| token | token returned by login |
 | dbname | database name |
+| async | default "no", if "yes" run the task in asynchronous mode |
+
+* The status of a task running in asynchronous mode can be checked using the 'gettaskstatus' api
 
 ## Request Sample
 
@@ -16,7 +21,19 @@ Runs lockdb utility.
 {
   "task": "lockdb",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
-  "dbname": "alatestdb"
+  "dbname": "alatestdb",
+  "async":"yes"
+}
+```
+
+## Response Sample (async mode)
+```
+{
+   "job-status" : "running",
+   "note" : "none",
+   "status" : "success",
+   "task" : "lockdb",
+   "uuid" : "1877908931382247367"
 }
 ```
 

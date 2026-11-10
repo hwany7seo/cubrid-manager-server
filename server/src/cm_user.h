@@ -27,6 +27,15 @@
 
 #define DBMT_USER_NAME_LEN 64
 
+/*
+ * DBMT_USER_IP_LEN - size of a buffer that holds a client IP address in text
+ *   form. Not less than INET6_ADDRSTRLEN on any supported platform (46 on
+ *   POSIX, 65 on Windows); a number here so that this header does not need
+ *   the network headers. cm_server_util.cpp checks it against
+ *   INET6_ADDRSTRLEN.
+ */
+#define DBMT_USER_IP_LEN 65
+
 typedef struct
 {
   char dbname[DBMT_USER_NAME_LEN];
@@ -59,10 +68,20 @@ typedef struct
 
 typedef struct T_USER_TOKEN_INFO T_USER_TOKEN_INFO;
 
+/*
+ * T_USER_TOKEN_INFO - one CMS session.
+ *
+ * Sessions live only in the in-memory session map keyed by token (see
+ * cm_user.cpp); the same user may hold several sessions at once. DB-login
+ * information supplied through dbmtuserlogin is kept per session in the C++
+ * session object (not in this plain struct), which callers reach through the
+ * dbmt_user_session_* helpers below. This struct is the value copied out to
+ * callers that only need the connection fields.
+ */
 struct T_USER_TOKEN_INFO
 {
   char user_id[DBMT_USER_NAME_LEN];
-  char user_ip[20];
+  char user_ip[DBMT_USER_IP_LEN];
   char user_port[10];
 #ifdef WINDOWS
   HANDLE proc_id;
@@ -72,16 +91,15 @@ struct T_USER_TOKEN_INFO
   time_t login_time;
 
   char token[TOKEN_ENC_LENGTH];
-
-  T_USER_TOKEN_INFO *next;
-  T_USER_TOKEN_INFO *prev;
-
 };
 
 int dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error);
 void dbmt_user_free (T_DBMT_USER *dbmt_user);
 int dbmt_user_write_auth (T_DBMT_USER *dbmt_user, char *_dbmt_error);
 int dbmt_user_write_pass (T_DBMT_USER *dbmt_user, char *_dbmt_error);
+int dbmt_user_read_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error);
+int dbmt_user_write_auth_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error);
+int dbmt_user_write_pass_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error);
 void dbmt_user_set_dbinfo (T_DBMT_USER_DBINFO *dbinfo, const char *dbname,
 			   const char *auth, const char *uid, const char *broker_address);
 void dbmt_user_set_authinfo (T_DBMT_USER_AUTHINFO *authinfo,
@@ -95,6 +113,32 @@ void dbmt_user_db_delete (T_DBMT_USER *dbmt_user, char *dbname);
 int dbmt_user_add_dbinfo (T_DBMT_USER_INFO *usrinfo,
 			  T_DBMT_USER_DBINFO *dbinfo);
 
+/*
+ * CMS authority of a user, as checked by ext_ut_validate_auth ().
+ * The values are AU_* bits (T_USER_AUTH, cm_job_task.h).
+ *
+ * dbmt_user_get_user_auth () - true if the user has a user_auth entry
+ *   (written by adddbmtuser_new/updatedbmtuser_new). Its value is stored in
+ *   *auth and is used as it is, even when it is 0.
+ * dbmt_user_legacy_auth_bits () - bits derived from the entries the legacy
+ *   API (adddbmtuser/updatedbmtuser) writes: dbcreate=admin -> AU_DBC,
+ *   unicas=admin -> AU_BRK, statusmonitorauth=admin -> AU_MON. Any other
+ *   value (monitor, none, empty) gives no bit.
+ * dbmt_user_effective_auth () - user_auth if the entry exists; otherwise the
+ *   legacy bits plus AU_DBO | AU_JOB, which the manual's three authorities do
+ *   not cover and legacy accounts have always been allowed. The user named
+ *   "admin" always has AU_ADMIN.
+ * dbmt_user_sync_user_auth () - the legacy API changed the legacy entries
+ *   whose bits are in changed_mask (a subset of AU_DBC | AU_BRK | AU_MON).
+ *   If the user also has a user_auth entry, recompute those bits in it (and
+ *   in the dbc/brk/mon yes/no entries, if present) so the change takes
+ *   effect; other bits are kept. Does nothing for a user without user_auth.
+ */
+bool dbmt_user_get_user_auth (const T_DBMT_USER_INFO *usrinfo, unsigned int *auth);
+unsigned int dbmt_user_legacy_auth_bits (const T_DBMT_USER_INFO *usrinfo);
+unsigned int dbmt_user_effective_auth (const T_DBMT_USER_INFO *usrinfo);
+void dbmt_user_sync_user_auth (T_DBMT_USER_INFO *usrinfo, unsigned int changed_mask);
+bool dbmt_user_has_auth (const char *user_id, unsigned int required);
 int dbmt_user_new_token_info (const char *user_id,
 			      const char *user_ip, const char *user_port,
 			      const char *token_enc,
@@ -105,9 +149,17 @@ int dbmt_user_new_token_info (const char *user_id,
 #endif
 			      time_t login_time);
 
-T_USER_TOKEN_INFO *dbmt_user_search_token_info (const char *user_id);
-T_USER_TOKEN_INFO *dbmt_user_search_token_info_by_token (const char *token);
-T_USER_TOKEN_INFO *dbmt_user_delete_token_info (const char *user_id);
-T_USER_TOKEN_INFO *dbmt_user_delete_token_info_by_token (const char *token);
+bool dbmt_user_search_token_info_by_token (const char *token, T_USER_TOKEN_INFO *out);
+bool dbmt_user_touch_token_login_time_by_token (const char *token, time_t now_time);
+bool dbmt_user_session_ip_should_warn (const char *token, const char *addr);
+bool dbmt_user_delete_token_info_by_token (const char *token);
+int dbmt_user_delete_all_sessions_of_user (const char *user_id);
+void dbmt_user_purge_expired_sessions (time_t now_time);
+
+bool dbmt_user_session_set_dblogin (const char *token, const char *dbname,
+				    const char *dbuser, const char *dbpasswd);
+bool dbmt_user_session_get_dblogin (const char *token, const char *dbname,
+				    char *dbuser, size_t dbuser_size,
+				    char *dbpasswd, size_t dbpasswd_size);
 
 #endif                /* _CM_USER_H_ */

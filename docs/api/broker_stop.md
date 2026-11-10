@@ -2,14 +2,18 @@
 
 The broker_stop interface will stop a specified broker.
 
+Permissions required to run this task: one of DBC, DBO, BRK
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| token | token returned by login |
 | bname | name of the broker to stop |
+| async | default "no", if "yes" run the task in asynchronous mode |
 
+* The status of a task running in asynchronous mode can be checked using the 'gettaskstatus' api
 
 ## Request Sample
 
@@ -17,7 +21,8 @@ The broker_stop interface will stop a specified broker.
 {
   "task": "broker_stop",
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
-  "bname": "broker1"
+  "bname": "broker1",
+  "async":"yes"
 }
 ```
 
@@ -38,4 +43,15 @@ The broker_stop interface will stop a specified broker.
     "status" : "success",
     "task" : "broker_stop"
     }
+```
+
+## Response Sample (async mode)
+```
+{
+   "job-status" : "running",
+   "note" : "none",
+   "status" : "success",
+   "task" : "broker_stop",
+   "uuid" : "1877908931382247367"
+}
 ```

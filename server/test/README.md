@@ -51,7 +51,10 @@ cd server/test
 # 목록의 sleep 줄 무시 (비동기 처리가 없는 서버용)
 ./run_tests.sh -ns
 
-# task_test_case/ 의 모든 세트를 차례로 실행
+# 동기로 실행된 요청이 http_timeout을 넘기면 실패로 처리 (기본은 경고만, 4.5 참고)
+./run_tests.sh -st
+
+# task_test_case/ 의 모든 세트를 차례로 실행 (이름으로만 실행하는 세트는 제외, 4.10 참고)
 ./run_tests.sh --all
 
 # 단건 응답을 실제 토큰으로 덤프 (문서 검증/작성용)
@@ -103,6 +106,11 @@ server/test/
       <case>.answer                     기준 응답 (커밋 대상)
       <case>.result                     -fc 실행 결과 (git 미추적)
     task_result_check/11_5/  11_2/  11_0/  10_2/
+    task_auth_check.txt               세트 3: 권한 검사 (CMS 사용자별, 4.8 참고)
+    task_auth_check/<case>            그 세트의 요청 JSON
+    task_session_ip_check.txt         세트 4: 요청 IP 검사 (session_ip_check, 4.10 참고)
+    task_session_ip_check/<case>      그 세트의 요청 JSON
+  unit/                               단위 테스트 (CUBRID 빌드 없이 실행, unit/README.md)
   task_test_config/                   케이스가 읽을 픽스처
     test_analyzecaslog.sql.log          analyzecaslog 용 CAS 로그
     tmp_file_for_test/                  getcaslogtopresult / removecasrunnertmpfile 용
@@ -190,6 +198,10 @@ server/test/
 파일마다 하드코딩돼 있었는데(30가지), 아무 의미가 없어 전부 빈 문자열로 정리했다.
 새 케이스를 만들 때도 `"token": ""`로 두면 된다(키를 생략해도 동작한다).
 
+예외는 `"token": "$CASE_LOGIN_TOKEN"`이다. 이 요청은 같은 케이스에서 마지막으로 성공한
+`login` 요청이 받은 토큰으로 보낸다. 다른 CMS 사용자로 실행해야 하는 권한 검사(4.8)에
+쓴다.
+
 ### 4.3 요청 파일 포맷
 
 `task_test_case/<세트>/<name>`은 하나의 JSON 객체(또는 객체 배열)다. 확장자는 없다.
@@ -215,6 +227,7 @@ server/test/
 | `$AUTO_QUERY_TIME` | 다음 1분 `YYYY/MM/DD HH:MM` |
 | `$TEST_KILL_PID` | `build_env()`가 띄운 더미 프로세스의 pid (`killprocess`용) |
 | `$TEST_TRANINDEX` | `build_env()`가 demodb에 열어 둔 트랜잭션의 인덱스 (`killtransaction`용) |
+| `$LAST_ASYNC_UUID` | 러너가 마지막으로 따라간 async 작업의 `uuid` (`gettaskstatus` 재조회용, 4.5 참고) |
 
 `$AUTO_*`는 예약 작업(backup/exec query 등)을 “곧 실행되도록” 만들기 위한 것이다.
 `$TEST_*`는 고정 id(pid `99999`, tranindex `2(+)`)로는 어느 호스트에서도 통과할 수 없던
@@ -228,6 +241,8 @@ server/test/
 <name>              # 결과 비교 대상. -fc 에서 <name>.answer 와 대조한다
 <name>,success      # status 만 검사 (success 기대). 기준값을 갖지 않는다
 <name>,failure      # status 만 검사 (failure 기대). 부정 테스트
+<name>,sync         # status 만 검사 (success 기대) + 동기 응답이어야 함
+                    # (uuid / job-status 가 있으면 실패, 4.5 참고)
 sleep <초>          # 다음 케이스 전까지 대기 (예: sleep 10, sleep 20)
                     # 빈 줄은 무시 (가독성용 구분)
 // ...              # '/'로 시작하면 주석/구분 헤더 (실행 안 함)
@@ -254,6 +269,9 @@ sleep 10
 - 실패를 기대하는 케이스(`,failure`)에는 붙이지 않는다. 거부된 요청은 아무 작업도
   시작하지 않는다
 
+`uuid`를 돌려준 요청은 러너가 끝날 때까지 기다린다(4.5의 자동 폴링). `sleep` 줄은
+응답에 `uuid`가 없는데도 작업이 뒤에서 이어지는 경우를 위한 것이다.
+
 **`-ns` / `--no-sleep`** — 목록의 `sleep` 줄을 전부 무시한다. 비동기 처리가 들어가지
 않은 서버에는 기다릴 이유가 없고, 대기가 실행 시간의 대부분이기 때문이다. 목록 하나로
 두 종류의 서버를 다 검증할 수 있다.
@@ -276,11 +294,40 @@ loaddb  lockdb  optimizedb  renamedb  restoredb  start_statdump
 startbroker  startdb  stop_statdump  stopbroker  stopdb  unloaddb
 ```
 
+### `cm_conf <key>=<value>` — cm.conf 변경과 manager 재시작
+
+manager는 cm.conf를 시작할 때만 읽으므로, 설정에 따라 동작이 바뀌는지 보려면 설정을 바꾸고
+다시 시작해야 한다. 목록에 다음 줄을 두면 러너가 `$CUBRID/conf/cm.conf`의 `[cm]` 절에서 그
+항목을 바꾸고 `cubrid manager stop` / `start`로 다시 시작한다.
+
+```
+cm_conf session_ip_check=enforce     # 항목을 이 값으로 (없으면 추가)
+cm_conf session_ip_check             # 항목을 지움 (서버 기본값으로)
+```
+
+- 다시 시작하면 모든 세션이 끝나므로, 러너는 자기 토큰을 새로 로그인해 받는다. 케이스 안의
+  `$CASE_LOGIN_TOKEN`은 케이스마다 새로 로그인하므로 영향이 없다.
+- 주석 처리된 줄(`#session_ip_check=log`)은 건드리지 않는다.
+- 세트 끝에서 바꾼 항목을 되돌리는 줄을 둔다. 중간에 멈춘 실행이 남긴 변경은 다음 실행의
+  시작에서 `cmstest_backup`으로 복원된다(`prepare_confs ()`).
+- manager가 이 호스트에 있어야 한다. 로컬 환경을 준비하지 않는 세트(`task_ha_result_check`)에서는
+  쓸 수 없다.
+
 **`,<status>`가 붙으면 그 케이스는 status 검사 전용이다.** `-a`로도 기준값을 만들지 않고,
 `-fc`에서도 선언한 status로만 판정한다. 쓰는 경우는 두 가지다.
 
 - **부정 테스트** — `userverify_fail,failure` 처럼 서버가 거부해야 하는 케이스
 - **기준값을 가질 수 없는 케이스** — 응답이 실행과 함께 자라는 것들 (4.5 참고)
+
+**`,sync`** 는 `,success`처럼 status 전용이면서, 응답이 **동기 응답**인지도 본다. 응답에
+`uuid`나 `job-status`가 있으면 status와 상관없이 실패(`async`)로 기록하고, 자동 폴링도 하지
+않는다. async를 지원하지 않는 task에 `"async":"yes"`를 보내면 무시되고 동기로 실행된다는
+것을 확인하는 데 쓴다.
+
+```
+// "async" on a task that does not support it is ignored: plain synchronous run
+getdbsize_async,sync
+```
 
 - `<name>`은 그 세트의 케이스 디렉터리에 있는 파일명과 일치해야 한다
   (`task_test_case/<세트>/<name>`, 확장자 없음).
@@ -303,6 +350,48 @@ startbroker  startdb  stop_statdump  stopbroker  stopdb  unloaddb
 
 기본 실행은 **파일을 아무것도 쓰지 않는다.** 기준값 생성은 `-a` / `--answer`를 줘야
 일어난다. 오늘의 응답을 내일의 기준값으로 삼는 일은 명시적으로 요청해야 한다는 원칙이다.
+
+**async 작업의 자동 폴링**
+
+응답이 `"job-status":"running"`과 `uuid`를 담고 있으면 작업이 아직 끝나지 않은 것이다.
+두 가지 경우가 있다.
+
+- 요청에 `"async":"yes"`를 넣은 경우 (`docs/api/async_readme.md`의 25개 task)
+- `"async"` 없이 보냈지만 서버의 `http_timeout`(기본 30초)을 넘긴 경우. 이때 즉시 응답은
+  `"status":"failure"`, `"note":"timeout"`이지만 작업은 뒤에서 계속 돈다
+
+러너는 이 응답으로 판정하지 않는다. 같은 토큰으로 `gettaskstatus`에 그 `uuid`를 보내
+`job-status`가 `running`이 아닐 때까지 폴링하고, **최종 응답**으로 판정한다
+(`send_one()` → `follow_job()`).
+
+- 판정은 최종 응답의 `status`다. `job-status:"error"`인 작업은 `status:"failure"`이므로
+  `,failure` 케이스로 검증할 수 있다
+- `gettaskstatus`가 `uuid not found`를 돌려주면(예: 그사이 CMS 재시작) 그 응답이 최종 응답이다
+- 폴링 간격은 `ASYNC_POLL_SEC`(1초), 최대 대기는 `ASYNC_WAIT_SEC`(600초)다. 넘기면
+  `timeout`으로 실패를 기록한다
+- 콘솔에는 `job <uuid> running ... polling gettaskstatus`와 `job <uuid> ended after N s`가
+  찍히고, 결과와 상세 XML에는 최종 응답만 남는다
+- 동기로 실행된 요청이 `http_timeout`을 넘긴 경우(즉시 응답의 `note`가 `timeout`)는
+  **timeout fallback**으로 따로 표시한다. task가 느려진 회귀는 최종 결과가 `success`여도
+  놓치면 안 되기 때문이다
+  - 판단은 즉시 응답의 `note`로만 한다. async를 지원하는 task에 `"async":"yes"`를 보내면
+    `note`가 `none`이라 해당되지 않고, 지원하지 않는 task(예: `getdbsize`)에 보낸
+    `"async":"yes"`는 무시되고 동기로 실행되므로 timeout이 나면 해당된다
+  - 그 자리에서 `warning: <case> ran past http_timeout ...` 경고를 찍고, 실행이 끝나면
+    `N request(s) ran past http_timeout ...` 아래에 케이스, 최종 status, 걸린 시간, `uuid`를
+    모아 보여 준다. 상세 XML의 해당 `<testcase>`에는 `timeout_fallback` property가 붙는다
+  - 기본은 경고만 하고 판정은 최종 결과로 한다
+  - **`-st` / `--strict-timeout`** 을 주면 그런 케이스를 실패로 센다. `-fc`에서 결과 파일이
+    기준값과 같아도, `,failure` 케이스여도 실패다
+- `uuid`는 받은 문자열 그대로 보낸다. 19자리까지 가능해 double로 바꾸면 값이 깨진다
+- 따라간 작업의 `uuid`는 `$LAST_ASYNC_UUID`에 남는다. 다음 케이스가 끝난 작업을 다시
+  조회할 때 쓴다 (`gettaskstatus_done`, `gettaskstatus_failed`). `gettaskstatus_failed`는
+  `startdb_async_fail`이 실제로 async 작업으로 실행됐는지도 확인한다. 동기로 실패했다면 이 값이
+  그 전 `checkdb_async`의 성공한 작업을 가리키므로 `,failure` 기대와 어긋나 실패한다
+- `-fc`에서는 `uuid`를 `VOLATILE_KEYS`로 가린다
+- `--dump`도 즉시 응답 다음에 최종 응답을 출력한다
+
+`,sync` 케이스는 자동 폴링을 하지 않는다(4.4 참고).
 
 **(2) 결과 파일 검사 (`-fc`, `--file-check`)**
 
@@ -374,7 +463,8 @@ task_test_case/task_result_check/11_4/<case>.result
 
 `VOLATILE_KEYS`는 **키 이름**으로 가린다. 값 전체가 실행마다 바뀌는 것들이다:
 `pid`, `as_pid`, `as_psize`, `as_lat`, `time`, `tran_time`, `tranindex`,
-`cpu_*`, `mem_*`, `free_size`, `freespace`, `size`, `total`, `token`.
+`cpu_*`, `mem_*`, `free_size`, `freespace`, `size`, `total`, `token`, `uuid`, `sizelock`
+(`lockdb`의 락 테이블 메모리. 실행 중 잡은 락의 양과 엔진 빌드에 따라 달라진다).
 
 `VOLATILE_PATTERNS`는 **모양**으로 가린다. 긴 문자열 안에 박혀 있어서 키 단위로는
 못 거르는 것들이다.
@@ -448,6 +538,123 @@ python3 test_tasks.py --dump <name> [<name> ...]
 - `adddbmtuser` 응답의 **첫 번째** `userlist` — 이 task는 사용자 목록을 두 번 담는데,
   앞쪽이 `dbauth`가 채워지기 전 상태다. 뒤쪽은 채워져 있다.
 
+### 4.8 권한 검사 세트 (`task_auth_check`)
+
+다른 세트는 모두 `admin`으로 실행하므로, task별 필요 권한(`task_info[]`,
+`ext_task_info[]`)과 `ext_ut_validate_auth()`의 사용자 권한 계산은 검증하지 못한다.
+`task_auth_check` 세트는 케이스마다 CMS 사용자를 만들고, 그 사용자로 로그인해 권한
+검사가 거부하는 task와 통과시키는 task를 확인한 뒤 사용자를 지운다.
+
+```sh
+./run_tests.sh task_auth_check.txt
+```
+
+케이스는 요청 배열이고, 목록에는 `,success`(status 전용)로 올린다. 요청마다 다음
+두 key를 쓸 수 있다.
+
+| key | 뜻 |
+| --- | --- |
+| `"token": "$CASE_LOGIN_TOKEN"` | 케이스 안에서 마지막으로 성공한 `login`의 토큰으로 보낸다. 없으면 러너의 `admin` 토큰 |
+| `"token": "$CASE_LOGIN_TOKEN#n"` | 케이스 안에서 n번째(1부터)로 성공한 `login`의 토큰. 한 사용자가 세션 여러 개를 동시에 쓰는 케이스에 쓴다 |
+| 중첩 객체·배열 안의 `"$CASE_LOGIN_TOKEN[#n]"` 값 | 최상위 `token`과 같은 규칙으로 해당 토큰으로 바꿔 보낸다. 중첩 객체에 다른 세션의 토큰을 몰래 넣는 케이스에 쓴다 |
+| `"test_sleep": <초>` | 이 요청을 보내기 전에 기다린다. 러너가 지우고 보낸다 |
+| `"test_expect": "<판정>"` | 이 요청만의 기대값. 러너가 지우고 보낸다. 없으면 목록의 기대값 |
+| `"test_note": "<문자열>"` | 응답 `note`에 이 문자열이 있어야 통과. 러너가 지우고 보낸다. 같은 `failure`라도 원하는 이유로 거부됐는지 구분할 때 쓴다 |
+| `"test_no_text": "<문자열>"` | 응답 원문에 이 문자열이 없어야 통과. 러너가 지우고 보낸다. 비밀번호가 응답에 나오지 않는지 확인할 때 쓴다 |
+| `"test_source_ip": "<주소>"` | 이 요청을 이 호스트의 그 주소에서 보낸다. 러너가 지우고 보낸다. 서버가 다른 클라이언트의 요청으로 보게 할 때 쓴다. `cmsip`가 `127.0.0.1`이면 Linux에서는 `127.0.0.2`처럼 `127.x.x.x` 아무 주소나 쓸 수 있다 |
+| `"test_no_key": "<a.b.c>"` | 응답 JSON에 이 key 경로가 없어야 통과. 러너가 지우고 보낸다. `.`으로 key를 잇고, 경로 중간의 배열은 모든 원소를 찾는다(예: `userlist.user.@passwd`). 값이 무엇이든 key가 있으면 실패하므로 암호문 형태의 유출도 잡는다 |
+| `"test_value": {"<a.b.c>": <값>, ...}` | 응답 JSON의 각 key 경로 값이 `<값>`과 같아야 통과. 러너가 지우고 보낸다. 경로는 `test_no_key`와 같고, 경로 중간의 배열은 원소 하나라도 같으면 통과. JSON 타입까지 비교한다(`2`와 `"2"`, `true`와 `1`은 다르다). 기대값이 배열·객체이면 원소와 key까지 같은 방식으로 비교한다. 빈 객체(`{}`)는 아무것도 비교하지 않으므로 오류로 실행을 멈춘다. 예: `{"closed_sessions": 2}` |
+
+판정 값은 `success`, `failure` 외에 다음을 쓸 수 있다.
+
+| 판정 | 통과 조건 |
+| --- | --- |
+| `denied` | 권한 검사가 거부함 (`status` failure, `note`가 `The user don't have authority to execute the task`로 시작) |
+| `allowed` | 권한 검사가 거부하지 않음. task 자체는 실패해도 된다 |
+| `any` | 판정하지 않음 (실패할 수 있는 사전 정리) |
+
+실제로 실행되면 안 되는 task(`createdb`, `runscript`, `deletebroker` 등)는 **필수
+파라미터를 빼고** 보낸다. 권한 검사가 잘못 통과시켜도 task가 `ERR_PARAM_MISSING`으로
+멈추므로 아무것도 바뀌지 않고, `denied`가 아니므로 케이스는 실패한다. `allowed`도 같은
+방법으로 권한 검사 통과만 확인한다.
+
+| 케이스 | 사용자 | 확인하는 것 |
+| --- | --- | --- |
+| `auth_legacy_none` | 기존 API, 세 권한 모두 none | AU_ANY 조회는 성공, `createdb`·`adddbmtuser`(DBC)·`runscript`·`getadminloginfo`(ADMIN) 거부, 기본 부여된 DBO로 `removestatustemplate` 통과 |
+| `auth_legacy_dbcreate` | 기존 API, `dbcreate=admin` | `createdb` 통과, `getadminloginfo`와 사용자 관리 task 5개(AU_ADMIN) 거부 |
+| `auth_new_mon` | `_new` API, `mon`만 yes | MON task 통과, DBO·JOB 기본 부여 없음(`deletebroker`·`createdb`·`runsqlstatement`·`readprivatedata` 거부). `plandump`는 되지만 `plandrop: y`는 거부 |
+| `auth_mixed_update` | `_new` API로 만든 뒤 기존 API로 변경 | 변경한 항목만 `user_auth`에 반영, `user_auth=0`이면 AU_ANY task만 실행 |
+| `auth_deleted_user` | 기존 API | 사용자를 지우면 남은 토큰으로 task를 실행할 수 없음 |
+| `auth_setdbmtpasswd` | 기존 API 계정, `_new` API dbc만 yes | 자기 비밀번호는 변경, 다른 사용자 것은 거부, admin은 변경 가능, 변경 후에도 세션 유지, 새 비밀번호로만 로그인 |
+| `auth_new_admin` | `_new` API, `admin:yes` | 사용자 관리 task, `getadminloginfo`, 다른 사용자 비밀번호 변경 가능 |
+| `file_protected_read` | admin | 보호 파일(cm.pass, cmdb.pass, conlist, autojobs.conf, autoexecquery.conf, SSL 키·인증서)을 `viewlog`·`getfiletotallinenum`·`errortrace`·`runsqlstatement`·`readprivatedata`·`getallsysparam`·`copyfolder`(src)로 읽지 못함. `./`, `//`, `..` 변형 포함. 옆의 일반 파일은 읽힘 |
+| `file_protected_write` | admin | `resetlog`·`writeandsaveconf`·`writeprivatedata`·`removelog`·`copyfolder`(dest)로 보호 파일을 쓰지 못함 |
+| `file_cubrid_bin` | admin | `writeandsaveconf`·`writeprivatedata`·`copyfolder`(dest)로 `$CUBRID/bin` 아래에 쓰지 못하고, `resetlog`·`removelog`로 비우거나 지우지 못함. 회귀해도 bin 아래 파일이 생기거나 지워지지 않도록 없는 경로를 쓴다 |
+| `resp_no_user_password` | admin | `getdbmtuserinfo`·`getdbmtuserinfo_new`와 사용자 관리 task 응답에 CMS 사용자 비밀번호(`@passwd`, 평문)가 없음 |
+| `resp_no_mail_password` | admin | `getautojobconf` 응답에 메일 비밀번호 key가 없음(`jobconf.password`, 전체 조회 시 `jobconf.mail_config.password`), 비밀번호 없이 `setautojobconf` 저장 가능. 대상 서버의 `mail_config`를 덮어쓴다(메일 off) |
+| `auth_internal_keys` | 기존 API, 권한 none | 최상위·중첩 객체·배열 안에 `_ID: admin`을 넣어 보내도 `getadminloginfo`가 거부됨 |
+| `auth_nested_task` | 기존 API, 권한 none | 최상위 `task`(`getcmsenv`, `login`, `keepalive`) 옆 중첩 객체에 `task: deletedbmtuser`를 넣어도 최상위 task만 실행되고 사용자는 지워지지 않음. 문자열이 아닌 `task`는 거부 |
+| `session_multi` | 기존 API | 같은 ID로 두 번 로그인하면 두 토큰 모두 동작, logout은 그 세션만 닫음, 사용자 삭제 시 남은 세션도 닫힘 |
+| `session_nested_token` | 기존 API | 세션 1의 토큰으로 보내는 `logout`의 중첩 객체 `a.token`에 세션 2의 토큰을 넣어도, 닫히는 것은 검증된 세션 1이고 세션 2는 계속 동작 |
+| `session_limit` | 기존 API | 17번 로그인하면 가장 오래 쓰지 않은 첫 세션이 닫히고 나머지는 동작. `max_sessions_per_user`=16(기본)을 전제로 한다 |
+| `force_admin_only` | 기존 API 계정, `_new` API로 admin 외 권한 모두 yes | 두 사용자 모두 `force_logout`이 거부되고, 대상 사용자의 세션은 그대로 동작 |
+| `force_two_sessions` | 기존 API | 같은 ID로 두 번 로그인한 뒤 admin이 `force_logout`: `closed_sessions` 2, 두 토큰 모두 `keepalive` 거부. 다른 사용자와 admin(러너) 세션은 동작 |
+| `force_no_session` | 기존 API | 세션이 없는 사용자: 성공, `closed_sessions` 0 |
+| `force_bad_param` | 기존 API | 없는 사용자, `targetid` 없음, 빈 값, 중첩 객체에만 있는 `targetid`, 문자열이 아닌 `targetid`(숫자·배열·객체)가 각각 정해진 note로 실패. 중첩 객체가 가리킨 사용자의 세션은 그대로 동작 |
+| `force_self` | `_new` API, `admin:yes` | 자기 자신 대상: 응답은 성공(`closed_sessions` 1), 같은 토큰의 다음 요청은 거부. 러너 토큰이 끊기지 않도록 케이스에서 만든 admin 사용자로 실행 |
+| `force_relogin` | 기존 API | 강제 로그아웃 뒤 같은 비밀번호로 다시 로그인할 수 있고, 새 토큰이 동작 |
+
+보호 파일 쓰기 케이스는 검사가 회귀하면 실제로 쓰게 되므로, 대상은 지워져도 문제없는 `conlist`만 쓴다.
+`copyfolder`는 존재하지 않는 원본을 주어 회귀해도 아무것도 복사되지 않게 한다. `deletefolder`는
+안전하게 검증할 방법이 없어 넣지 않았다.
+
+케이스가 중간에 멈춰 사용자가 남아도, 다음 실행의 첫 요청(`deletedbmtuser`, `any`)이
+지운다. 사용자 이름은 `authtest_`로 시작한다.
+
+---
+
+### 4.9 문서 일치 검사 (`--check-docs`)
+
+`docs/api`의 task별 필요 권한(각 문서의 "Permissions required to run this task" 줄과 README 표)은
+소스의 task 표에서 `docs/api/tools/gen_task_authority.py`로 생성한다. task 표를 바꾸고 문서를
+다시 생성하지 않으면 다음 명령이 실패한다. 서버 없이 돈다.
+
+```sh
+./run_tests.sh --check-docs
+```
+
+### 4.10 요청 IP 검사 세트 (`task_session_ip_check`)
+
+cm.conf의 `session_ip_check`(CBRD-27861)에 따라, 로그인한 곳과 다른 주소에서 온 요청을 처리하거나
+거부하는지 확인한다. 케이스는 `127.0.0.1`에서 로그인하고, 일부 요청을 `"test_source_ip":
+"127.0.0.2"`로 보낸다. 그래서 `cmsip`가 `127.0.0.1`이고 Linux 호스트여야 한다. 모드는 목록의
+`cm_conf` 줄로 바꾼다(4.4). 줄마다 manager를 다시 시작하므로 몇 분 걸린다.
+
+이 조건을 갖추지 않은 환경에서 실패하지 않도록, 이 세트는 **이름을 지정했을 때만 실행한다.**
+`--all`은 이 세트를 건너뛰고(`run_tests.sh`의 `NAMED_ONLY_SETS`), CI에서도 돌지 않는다.
+
+```sh
+./run_tests.sh task_session_ip_check.txt
+```
+
+| 케이스 | 모드 | 확인하는 것 |
+| --- | --- | --- |
+| `session_ip_off` | `off` | 다른 주소의 요청(`keepalive`, `dbmtuserlogin`)이 처리되고, 그 뒤 로그인한 주소에서도 같은 토큰이 동작. `logout` 뒤에는 토큰이 거부됨 |
+| `session_ip_log` | `log` | `off`와 같은 결과(요청 처리, 세션 유지). 경고 로그는 확인하지 않는다 |
+| `session_ip_enforce` | `enforce` | 로그인한 주소의 요청은 처리. 다른 주소의 요청은 `invalid token`으로 거부되고, 그 뒤 로그인한 주소에서도 같은 토큰이 거부됨(세션 삭제). 다른 주소에서 새로 로그인한 세션은 그 주소에서만 동작 |
+| `session_ip_default` | 항목 없음 | 기본값이 `log`처럼 동작. 이 줄이 세트가 바꾼 cm.conf를 되돌린다 |
+
+케이스마다 CMS 사용자(`iptest_`로 시작)를 만들고 지운다. 중간에 멈춰 남은 사용자는 다음 실행의
+첫 요청(`deletedbmtuser`, `any`)이 지운다.
+
+**DB 로그인 삭제는 세션이 없어졌는지로 확인한다.** `dbmtuserlogin`으로 저장한 DB 로그인은
+그 세션 객체 안에만 있고(디스크에 쓰지 않음), 세션을 지우는 함수가 함께 지운다. 이를 조회하는
+API는 없으므로, `enforce` 케이스는 DB 로그인을 저장한 세션이 거부 후 어디서도 쓸 수 없는지를 본다.
+
+같은 주소의 다른 표기(IPv4-mapped IPv6, IPv6의 0 생략과 대소문자, scope)는 CMS가 IPv4로만
+listen하므로 이 세트로 만들 수 없다. 이것과 모드별 처리 표는 단위 테스트(`unit/test_session_ip.cpp`)가
+확인한다. `off`와 `log`는 경고 로그만 다르므로, 둘을 구분하는 것도 단위 테스트다.
+
 ---
 
 ## 5. API를 추가하거나 변경할 때
@@ -511,4 +718,5 @@ task_test_case/task_status_check/unloaddb_optional  # as-dba 등 선택 파라�
   `server/src/cm_server_extend_interface.cpp`의 `ext_task_info[]`
 - API 문서: `docs/api/<task>.md` (요청/응답 규격)
 - 실행 스크립트: `run_tests.sh`
+- 단위 테스트: `unit/` (CUBRID 빌드 없이 도는 서버 소스 테스트, `unit/README.md` 참고)
 

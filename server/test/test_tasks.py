@@ -21,7 +21,7 @@ DEFAULT_TEST_SET = "task_status_check.txt"
 TEST_CONFIG_DIR = "task_test_config/"
 
 KNOWN_VERSIONS = ("10_2", "11_0", "11_2", "11_3", "11_4", "11_5")
-DEFAULT_VERSION = "11_4"
+DEFAULT_VERSION = "11_5"
 # Where start_kill_targets() records the processes it spawned, so that a run
 # killed before clean_env() can be cleaned up by the next one.
 HELPER_PID_FILE = "log/helper_pids"
@@ -80,21 +80,30 @@ def answer_base(slot):
 
 
 def parse_list_line(line):
-    """Split a scenario line into (case name, expected status, status only).
+    """Split a scenario line into (case name, expected status, status only,
+    synchronous only).
 
     A line is either
 
         <case>              compared against <case>.answer by --file-check
         <case>,<status>      checked by its status field only
+        <case>,sync          must succeed without being turned into an async job
 
     The comma form is what marks a case as status only: negative cases
     (`userverify_fail,failure`) and cases whose response cannot have a stable
     baseline (`loadaccesslog,success`). Those never get an .answer, and
     --file-check judges them by the status they declare.
+
+    `,sync` is a status only case expecting success whose response must come
+    back synchronously: no `uuid`, no `job-status`. It is how a case checks
+    that "async":"yes" is ignored by a task that does not support it.
     """
     name, comma, expected = line.partition(",")
     expected = expected.strip()
-    return name.strip(), (expected or "success"), bool(comma)
+    must_be_sync = (expected == "sync")
+    if must_be_sync:
+        expected = "success"
+    return name.strip(), (expected or "success"), bool(comma), must_be_sync
 
 
 # Values that differ on every run even when the server behaves identically:
@@ -107,8 +116,48 @@ VOLATILE_KEYS = frozenset((
     "cpu_kernel", "cpu_user", "cpu_idle", "cpu_iowait",
     "mem_physical", "mem_virtual", "mem_phy_free",
     "free_size", "freespace", "size", "total",
-    "token",
+    "token", "CMS_VER", "CUBRIDVER", "dbsize", "used_size",
+    "BROKERVER", "date", "freepage", "usedpage", "reserved_size",
+    "file_table_size", "file_count", "totalnum", "total_size",
+    # job id of an async (or timed out) request, new on every run
+    "uuid",
+    # lockdb: memory of the object lock table, the allocated entries and
+    # resources times their struct sizes. It grows with the locks the run has
+    # held so far and changes with the engine build.
+    "sizelock",
 ))
+
+# Lists the server builds from readdir(), whose order depends on the file
+# system rather than on the server: the name of the list, the field that orders
+# it, and which items to order. getlogfileinfo answers "logfile" in a different
+# order on every run, and dbspace/dbspaceinfo append the log volumes they find
+# in the database directory to "spaceinfo" after the volumes spacedb lists in
+# volid order. Only those log items are ordered; the rest keep their place.
+UNORDERED_LISTS = {
+    "logfile": ("path", None),
+    "spaceinfo": ("spacename", {"type": ("Active_log", "Archive_log")}),
+}
+
+
+def sort_unordered(items, field, only):
+    """Order the items of a list that "only" selects by "field", in place.
+
+    The selected items are put back into the slots they came from, so the
+    position of every other item is still compared as the server sent it.
+    """
+    def selected(item):
+        if only is None:
+            return True
+        return isinstance(item, dict) and all(item.get(k) in v
+                                              for k, v in only.items())
+
+    slots = [i for i, item in enumerate(items) if selected(item)]
+    ordered = sorted((items[i] for i in slots),
+                     key=lambda item: str(item.get(field, ""))
+                     if isinstance(item, dict) else str(item))
+    for i, item in zip(slots, ordered):
+        items[i] = item
+
 
 # Timestamps and temporary file names are embedded in longer strings, so they
 # are masked by shape rather than by key.
@@ -158,7 +207,12 @@ def normalize_response(body):
             for key, value in node.items():
                 if key == "__EXEC_TIME":
                     continue
-                out[key] = "<volatile>" if key in VOLATILE_KEYS else walk(value)
+                if key in VOLATILE_KEYS:
+                    out[key] = "<volatile>"
+                    continue
+                out[key] = walk(value)
+                if key in UNORDERED_LISTS and isinstance(out[key], list):
+                    sort_unordered(out[key], *UNORDERED_LISTS[key])
             return out
         if isinstance(node, list):
             return [walk(v) for v in node]
@@ -235,34 +289,228 @@ cmsip, port = load_config()
 url = "/cm_api"
 
 token = ""
+# The login request init_env() succeeded with, for login_again().
+login_request = None
 CUBRID = ""
 CUBRID_DATABASES = ""
 
 results = []
+
+# Requests that ran synchronously past the server's http_timeout: the server
+# answered "note":"timeout" and kept the task running, and the case was judged
+# by the job's final result. See send_one() and do_one_job().
+timeout_fallbacks = []
 
 # Placeholders whose value is only known once the run has started, see
 # start_kill_targets().
 runtime_vars = {}
 helper_procs = []
 
+# Authorization checks (task_auth_check): a request of a case can run as a
+# CMS user the case itself logged in as, and can expect the authority check to
+# refuse or let it through, see do_one_job () and judged_status ().
+#
+#   "token": "$CASE_LOGIN_TOKEN"   send with the token of the last successful
+#                                  "login" request of the same case, instead of
+#                                  the runner's own (admin) token
+#   "token": "$CASE_LOGIN_TOKEN#n" the token of the n-th (1-based) successful
+#                                  "login" of the same case, for cases that
+#                                  hold several sessions at once
+#   The same two values inside a nested object or list of the request are
+#   replaced as well, wherever they appear (for cases that smuggle a second
+#   token in a nested object).
+#   "test_sleep": <seconds>        wait before sending this request (removed
+#                                  before sending)
+#   "test_expect": "<verdict>"     expectation of this request only; the key is
+#                                  removed before the request is sent
+#   "test_note": "<text>"          the response note must also contain <text>
+#                                  (removed before sending); tells a refusal
+#                                  apart from any other failure
+#   "test_no_text": "<text>"       the raw response must not contain <text>
+#                                  (removed before sending); checks that a
+#                                  value, e.g. a password, is not returned
+#   "test_no_key": "<a.b.c>"       the response must not have this key path
+#                                  (removed before sending); "." separates
+#                                  object keys, and a list on the way is
+#                                  searched in every element
+#   "test_value": {"<a.b.c>": <v>}  the value at each key path must equal <v>
+#                                  (removed before sending); paths as for
+#                                  test_no_key, a list on the way passes when
+#                                  any element has the value. JSON types must
+#                                  match: 2 is not "2", and true is not 1; an
+#                                  empty object stops the run
+#   "test_source_ip": "<address>"  send this request from that local address
+#                                  (removed before sending), so that the
+#                                  manager sees another client; see
+#                                  exec_task ()
+#
+# Besides "success" and "failure", the verdict can be
+#   denied   refused by the authority check (the note below)
+#   allowed  not refused by it; the task itself may still fail, which is how a
+#            case checks a task it must not really run (bad parameters)
+#   any      not judged (setup or cleanup that may legitimately fail)
+CASE_LOGIN_TOKEN = "$CASE_LOGIN_TOKEN"
+CASE_LOGIN_TOKEN_N = re.compile(r"^\$CASE_LOGIN_TOKEN#([1-9][0-9]*)$")
+
+
+def case_login_token(value, case_tokens, default):
+    """The token a request of a case asks for with its "token" value."""
+    if value == CASE_LOGIN_TOKEN:
+        return case_tokens[-1] if case_tokens else ""
+    m = CASE_LOGIN_TOKEN_N.match(str(value))
+    if m:
+        n = int(m.group(1))
+        return case_tokens[n - 1] if n <= len(case_tokens) else ""
+    return default
+
+
+def resolve_nested_tokens(node, case_tokens, top=True):
+    """Replace "$CASE_LOGIN_TOKEN[#n]" values nested in the request.
+
+    The top-level "token" is left to case_login_token (); every other string
+    value equal to one of these forms, at any depth, gets that login token.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if top and key == "token":
+                continue
+            if isinstance(value, str) and value.startswith(CASE_LOGIN_TOKEN):
+                node[key] = case_login_token(value, case_tokens, value)
+            else:
+                resolve_nested_tokens(value, case_tokens, False)
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            if isinstance(value, str) and value.startswith(CASE_LOGIN_TOKEN):
+                node[i] = case_login_token(value, case_tokens, value)
+            else:
+                resolve_nested_tokens(value, case_tokens, False)
+
+
+DENIED_NOTE = "The user don't have authority to execute the task"
+
+
+def is_denied(data):
+    return (data.get("status") == "failure"
+            and str(data.get("note", "")).startswith(DENIED_NOTE))
+
+
+def has_key_path(node, path):
+    """Whether the key path ["a", "b", ...] exists in `node`.
+
+    A list on the way is searched in every element, so that a path like
+    "userlist.user.@passwd" reaches into the lists CMS wraps objects in.
+    """
+    if not path:
+        return True
+    if isinstance(node, list):
+        return any(has_key_path(item, path) for item in node)
+    if isinstance(node, dict) and path[0] in node:
+        return has_key_path(node[path[0]], path[1:])
+    return False
+
+
+def values_at_path(node, path):
+    """Every value found at the key path ["a", "b", ...] in `node`.
+
+    Lists on the way are searched like has_key_path () does.
+    """
+    if not path:
+        return [node]
+    if isinstance(node, list):
+        found = []
+        for item in node:
+            found.extend(values_at_path(item, path))
+        return found
+    if isinstance(node, dict) and path[0] in node:
+        return values_at_path(node[path[0]], path[1:])
+    return []
+
+
+def same_json_value(a, b):
+    """JSON equality: Python's == alone takes True for 1 and 2 for 2.0 only."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, list):
+        return len(a) == len(b) and all(
+            same_json_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(
+            same_json_value(a[key], b[key]) for key in a)
+    return a == b
+
+
+def value_mismatch(data, values):
+    """The first test_value entry `data` does not satisfy, as a message."""
+    for path, want in values.items():
+        found = values_at_path(data, path.split("."))
+        if not any(same_json_value(v, want) for v in found):
+            if not found:
+                return "no key %r" % path
+            got = found[0] if len(found) == 1 else found
+            return "%s is %s, not %s" % (path, json.dumps(got),
+                                         json.dumps(want))
+    return None
+
+
+def judged_status(data, expected, note_text=None, no_text=None, body="",
+                  no_key=None, values=None):
+    """The value compared with `expected` for a response `data`."""
+    if values:
+        mismatch = value_mismatch(data, values)
+        if mismatch is not None:
+            return "%s (%s)" % (data.get("status"), mismatch)
+    if no_text is not None and no_text in body:
+        return "%s (response contains %r)" % (data.get("status"), no_text)
+    if no_key is not None and has_key_path(data, no_key.split(".")):
+        return "%s (response has key %r)" % (data.get("status"), no_key)
+    if note_text is not None and note_text not in str(data.get("note", "")):
+        # Right status for the wrong reason is not a pass.
+        return "%s (note without %r)" % (data.get("status"), note_text)
+    if expected == "denied":
+        return "denied" if is_denied(data) else data.get("status")
+    if expected == "allowed":
+        return "denied" if is_denied(data) else "allowed"
+    if expected == "any":
+        return "any"
+    return data.get("status")
+
+
 # The manager server serves cm_port over TLS with a self signed certificate,
 # so the certificate of the host under test is not verified here.
 ssl_context = ssl._create_unverified_context()
 
 
-def exec_task(ip, port, url, body):
+def exec_task(ip, port, url, body, source_ip=None):
     """Send one request to the manager server.
 
     A refused connection means the manager is not running, which is worth
     saying plainly: as a traceback out of http.client it reads like a bug in
     the runner rather than a service that has to be started first.
+
+    `source_ip` sends the request from that local address ("test_source_ip"
+    of a case), so that the manager sees it come from another client.
     """
     import http.client
-    conn = http.client.HTTPSConnection(ip, port, context=ssl_context)
+    source = (source_ip, 0) if source_ip else None
+    conn = http.client.HTTPSConnection(ip, port, context=ssl_context,
+                                       source_address=source)
     try:
         conn.request("POST", url, body)
         return conn.getresponse().read()
     except (ConnectionError, socket.error) as exc:
+        if source_ip:
+            # Not a manager that is down: this host cannot send from that
+            # address to cmsip (a loopback source needs a loopback cmsip).
+            print("\033[31mcannot send from %s to the manager server at "
+                  "%s:%s (%s).\033[0m" % (source_ip, ip, port, exc))
+            print("\"test_source_ip\" needs an address of this host that can "
+                  "reach cmsip; 127.0.0.2 works when cmsip is 127.0.0.1 on "
+                  "Linux.")
+            sys.exit(1)
         print("\033[31mcannot reach the manager server at %s:%s (%s).\033[0m"
               % (ip, port, exc))
         print("start it with 'cubrid service start' on that host, or check "
@@ -354,10 +602,83 @@ def print_response(response):
               % (len(lines) - RESPONSE_LINES, REPORT_BASE))
 
 
-def send_one(name, req, token, expected="success", casefile=""):
+# A request answered with "job-status":"running" and a "uuid" has not finished:
+# either it asked for "async":"yes" on a task that supports it ("note":"none"),
+# or it ran synchronously past the server's http_timeout and was left running
+# in the background ("status":"failure", "note":"timeout").
+# The runner then polls gettaskstatus with that uuid and judges the case by the
+# job's final response, never by the immediate one.
+#
+# The second kind is still worth knowing about: a task that used to answer in
+# a few seconds and now needs more than http_timeout is a regression even when
+# it ends in "success". Such requests are flagged, listed at the end of the run
+# as a warning, and with --strict-timeout counted as failures.
+ASYNC_POLL_SEC = 1.0
+ASYNC_WAIT_SEC = 600
+
+
+def is_running_job(data):
+    return (isinstance(data, dict) and data.get("job-status") == "running"
+            and data.get("uuid") not in (None, ""))
+
+
+def is_timeout_fallback(data):
+    """A request that ran synchronously past the server's http_timeout.
+
+    The server tells the two kinds of running job apart by the note alone: a
+    task started with "async":"yes" answers "note":"none" right away, a
+    synchronous run it gave up waiting on answers "note":"timeout". The
+    request is not looked at: "async":"yes" on a task that does not support it
+    is ignored and runs synchronously, and can time out like any other.
+    """
+    return is_running_job(data) and data.get("note") == "timeout"
+
+
+def follow_job(name, data, token):
+    """Poll gettaskstatus until the job `data` announced is no longer running.
+
+    Returns (final data, final body, problem). `problem` is None when the job
+    ended, otherwise a (status, note) pair to record instead: the job outlived
+    ASYNC_WAIT_SEC, or a poll did not answer in JSON.
+
+    The uuid is sent back exactly as received (a string): it can be 19 digits,
+    more than a double holds, so it must never go through a number.
+    """
+    uuid = str(data["uuid"])
+    # A later case can look the same job up again ("uuid":"$LAST_ASYNC_UUID").
+    runtime_vars["$LAST_ASYNC_UUID"] = uuid
+    started = time.time()
+    print("%s : job %s running (note: %s), polling gettaskstatus"
+          % (name, uuid, data.get("note", "none")))
+    poll = {"task": "gettaskstatus", "token": token, "uuid": uuid}
+    while True:
+        time.sleep(ASYNC_POLL_SEC)
+        body = exec_task(cmsip, port, url, json.dumps(poll)).decode(
+            errors="replace")
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return None, body, ("invalid",
+                                "non JSON gettaskstatus response: %s"
+                                % body[:200])
+        if data.get("job-status") != "running":
+            print("    job %s ended after %.0f s: %s"
+                  % (uuid, time.time() - started,
+                     data.get("job-status", data.get("note", ""))))
+            return data, body, None
+        if time.time() - started >= ASYNC_WAIT_SEC:
+            return None, body, ("timeout",
+                                "job %s still running after %d s"
+                                % (uuid, ASYNC_WAIT_SEC))
+
+
+def send_one(name, req, token, expected="success", casefile="",
+             must_be_sync=False, note_text=None, no_text=None, no_key=None,
+             values=None, source_ip=None):
     req["token"] = token
     task = req.get("task", name)
-    response = exec_task(cmsip, port, url, json.dumps(req))
+    started = time.time()
+    response = exec_task(cmsip, port, url, json.dumps(req), source_ip)
     # Tasks that echo a log file back (loadaccesslog) can carry bytes that are
     # not valid UTF-8, because the server writes error messages with an
     # uninitialized buffer into the log. That is a server defect, but it must
@@ -370,11 +691,57 @@ def send_one(name, req, token, expected="success", casefile=""):
                "non JSON response: %s" % response[:200], expected, body,
                quiet=file_check)
         return {"task": task, "status": "failure"}
+    if must_be_sync:
+        if "uuid" in data or "job-status" in data:
+            record(name, casefile, task, "async",
+                   "expected a synchronous response, got job %s (%s)"
+                   % (data.get("uuid"), data.get("job-status")),
+                   expected, body, quiet=file_check)
+            return data
+    elif is_running_job(data):
+        timed_out = is_timeout_fallback(data)
+        uuid = str(data["uuid"])
+        if timed_out:
+            print("    \033[33mwarning: %s ran past http_timeout "
+                  "(\"note\":\"timeout\"); %s\033[0m"
+                  % (name, "counted as a failure (--strict-timeout)"
+                     if strict_timeout else "judged by the final result"))
+        final, final_body, problem = follow_job(name, data, token)
+        if problem:
+            record(name, casefile, task, problem[0], problem[1], expected,
+                   final_body, quiet=file_check)
+            if timed_out:
+                flag_timeout_fallback(name, uuid, started)
+            return {"task": task, "status": "failure"}
+        data, body = final, final_body
+        if timed_out:
+            # The final result is recorded as usual. Under --strict-timeout,
+            # do_one_job() turns it into a failure once the case is judged and
+            # prints that verdict instead of this status line.
+            record(name, casefile, task,
+                   judged_status(data, expected, note_text, no_text, body,
+                                 no_key, values),
+                   data.get("note", ""), expected, body,
+                   quiet=(file_check or strict_timeout))
+            flag_timeout_fallback(name, uuid, started)
+            return data
     # The raw body is kept verbatim: docs/api/*.md quote the server's own
     # formatting, so a re-serialized copy would not be comparable.
-    record(name, casefile, task, data.get("status"), data.get("note", ""),
-           expected, body, quiet=file_check)
+    record(name, casefile, task,
+           judged_status(data, expected, note_text, no_text, body,
+                         no_key, values),
+           data.get("note", ""), expected, body, quiet=file_check)
     return data
+
+
+def flag_timeout_fallback(name, uuid, started):
+    """Mark the result just recorded as a request that outlived http_timeout."""
+    item = results[-1]
+    item["timeout_fallback"] = True
+    timeout_fallbacks.append({"name": name, "file": item.get("file", ""),
+                              "task": item.get("task", name), "uuid": uuid,
+                              "status": item.get("status"),
+                              "elapsed": time.time() - started})
 
 
 case_runs = {}
@@ -393,7 +760,7 @@ def result_slot(name):
 
 
 def do_one_job(name, taskfile, token, expected="success", record_files=True,
-               status_only=False):
+               status_only=False, must_be_sync=False):
     """Run one case: every request in it, then the answer handling.
 
     `status_only` comes from the ",<status>" form in the scenario file. Such a
@@ -401,12 +768,35 @@ def do_one_job(name, taskfile, token, expected="success", record_files=True,
     """
     before = len(results)
     request = load_task(taskfile)
-    if isinstance(request, list):
-        for index, req in enumerate(request):
-            data = send_one("%s[%d]" % (name, index), req, token, expected,
-                            taskfile)
-    else:
-        data = send_one(name, request, token, expected, taskfile)
+    # Tokens of the successful "login" requests of this case, in order, for
+    # the requests that ask for one with "$CASE_LOGIN_TOKEN[#n]".
+    case_tokens = []
+    requests = request if isinstance(request, list) else [request]
+    for index, req in enumerate(requests):
+        req_expected = req.pop("test_expect", expected)
+        req_note = req.pop("test_note", None)
+        req_no_text = req.pop("test_no_text", None)
+        req_no_key = req.pop("test_no_key", None)
+        req_values = req.pop("test_value", None)
+        if req_values is not None and (not isinstance(req_values, dict)
+                                       or not req_values):
+            # an empty object would compare nothing and always pass
+            print("\033[31m%s: \"test_value\" must be a non-empty object of "
+                  "key path to value.\033[0m" % taskfile)
+            sys.exit(1)
+        req_sleep = req.pop("test_sleep", None)
+        req_source_ip = req.pop("test_source_ip", None)
+        req_token = case_login_token(req.get("token"), case_tokens, token)
+        resolve_nested_tokens(req, case_tokens)
+        if req_sleep:
+            time.sleep(float(req_sleep))
+        label = ("%s[%d]" % (name, index)) if isinstance(request, list) else name
+        data = send_one(label, req, req_token, req_expected, taskfile,
+                        must_be_sync, req_note, req_no_text, req_no_key,
+                        req_values, req_source_ip)
+        if (req.get("task") == "login" and data.get("status") == "success"
+                and data.get("token")):
+            case_tokens.append(data["token"])
     # An array case sends several requests; its answer covers all of them, in
     # order, so that the file is the record of the whole case.
     entries = results[before:]
@@ -423,7 +813,37 @@ def do_one_job(name, taskfile, token, expected="success", record_files=True,
             check_against_answer(name, slot, text, entries)
         elif make_answer:
             write_answer(slot, text)
+    if any(e.get("timeout_fallback") for e in entries):
+        # --file-check replaces the per request results with one verdict of
+        # the comparison; carry the flag over to it so the report keeps it.
+        for item in results[before:]:
+            if not any(item is e for e in entries):
+                item["timeout_fallback"] = True
+        if strict_timeout:
+            fail_timeout_fallback(name, before)
     return data
+
+
+def fail_timeout_fallback(name, before):
+    """--strict-timeout: a case with a request that outlived http_timeout fails.
+
+    This runs after the case has been judged, because --file-check replaces
+    the per request results with a single verdict of the comparison; that
+    verdict is turned into a failure too, so the timeout cannot be hidden by
+    a matching baseline.
+    """
+    note = "ran past http_timeout (--strict-timeout)"
+    for item in results[before:]:
+        if not item.get("timeout_fallback"):
+            continue
+        if item["ok"]:
+            item["ok"] = False
+            item["note"] = note
+        elif note not in item.get("note", ""):
+            item["note"] = "%s; %s" % (note, item.get("note", ""))
+        print("%s [%s] : " % (item["name"], item.get("task", name))
+              + '\033[31mfailed ({0})\033[0m'.format(item["note"]))
+        print("    case file: %s" % item.get("file", ""))
 
 
 def write_answer(taskfile, text):
@@ -507,6 +927,10 @@ def report_status_only(name, entries):
 
 
 SLEEP_LINE = re.compile(r"^sleep[ \t]+(\d+(?:\.\d+)?)$")
+# "cm_conf <key>=<value>" sets a cm.conf entry, "cm_conf <key>" removes it;
+# either restarts the manager server, see change_cm_conf().
+CM_CONF_LINE = re.compile(r"^cm_conf[ \t]+([A-Za-z_][A-Za-z_0-9]*)"
+                          r"(?:[ \t]*=[ \t]*(\S+))?[ \t]*$")
 
 
 def do_all_jobs(token):
@@ -535,9 +959,14 @@ def do_all_jobs(token):
                 print("sleep %s" % wait.group(1))
                 time.sleep(seconds)
                 continue
-            name, expected, status_only = parse_list_line(line)
+            conf = CM_CONF_LINE.match(line)
+            if conf:
+                # The restart ends every session, the runner's own as well.
+                token = change_cm_conf(conf.group(1), conf.group(2))
+                continue
+            name, expected, status_only, must_be_sync = parse_list_line(line)
             do_one_job(name, case_path(name), token, expected,
-                       status_only=status_only)
+                       status_only=status_only, must_be_sync=must_be_sync)
 
 
 def first_difference(expected_txt, actual):
@@ -568,6 +997,14 @@ def dump_one(name, token):
             print(json.dumps(data, indent=3, sort_keys=True, ensure_ascii=False))
         except ValueError:
             print(response.decode(errors="replace"))
+            continue
+        # Print the final response of a job too: the immediate one of an
+        # async request only says that it started.
+        if is_running_job(data):
+            final, final_body, problem = follow_job(name, data, token)
+            print(final_body if problem else
+                  json.dumps(final, indent=3, sort_keys=True,
+                             ensure_ascii=False))
 
 
 def stop_test_servers():
@@ -804,6 +1241,25 @@ def wait_for_mon_data(timeout=120):
     return False
 
 
+def copy_extra_files():
+    """Copy task_test_config/copy_files/ into $CUBRID, keeping its folders.
+
+    Whatever sits under that directory lands at the same relative path under
+    $CUBRID (copy_files/log/manager/x.log -> $CUBRID/log/manager/x.log).
+    Does nothing when the directory is absent.
+    """
+    srcroot = os.path.join(TEST_CONFIG_DIR, "copy_files")
+    if not os.path.isdir(srcroot):
+        return
+    for root, _dirs, files in os.walk(srcroot):
+        rel = os.path.relpath(root, srcroot)
+        destdir = CUBRID if rel == "." else os.path.join(CUBRID, rel)
+        if not os.path.isdir(destdir):
+            os.makedirs(destdir)
+        for name in files:
+            shutil.copy(os.path.join(root, name), destdir)
+
+
 def build_env():
     """Create what the test cases expect to find on the host."""
     # reset_leftovers() already did this with the paths from the environment;
@@ -838,6 +1294,7 @@ def build_env():
     if not os.path.isdir(folder):
         os.makedirs(folder)
     make_loaddb_input(tmpdir)
+    copy_extra_files()
     # adddbmtuser creates "yifan" and deletedbmtuser drops it again. A run that
     # died between the two leaves the user behind, and the next adddbmtuser
     # then fails with "already exist"; this is a no-op when it is not there.
@@ -915,6 +1372,9 @@ def write_junit_xml(path, with_response=False):
                       'time="0" classname="CMSERVER_TEST">\n'
                       % (xml_escape(item["name"]), xml_escape(item["file"]),
                          xml_escape(item.get("task", ""))))
+            if item.get("timeout_fallback"):
+                out.write('<properties><property name="timeout_fallback" '
+                          'value="yes"/></properties>\n')
             if not item["ok"]:
                 out.write('<failure message="%s" type=""></failure>\n'
                           % xml_escape(item["note"]))
@@ -938,6 +1398,82 @@ def wait_for_manager(timeout=90):
     print("\033[31mthe manager server did not come back up within %d s.\033[0m"
           % timeout)
     return False
+
+
+def set_cm_conf_entry(cubrid_home, key, value):
+    """Set "key=value" in the [cm] section of cm.conf, or remove the key.
+
+    Only lines that set the key are touched; a commented one ("#key=...", as
+    the default cm.conf has) is left as it is. value None removes the key, so
+    that the manager uses its default.
+    """
+    path = os.path.join(cubrid_home, "conf", "cm.conf")
+    with open(path, "r") as f:
+        lines = f.read().split("\n")
+    pattern = re.compile(r"^\s*%s\s*[=\s]" % re.escape(key))
+    lines = [l for l in lines if not pattern.match(l)]
+    if value is not None:
+        pos = next((i + 1 for i, l in enumerate(lines) if l.strip() == "[cm]"),
+                   len(lines))
+        lines.insert(pos, "%s=%s" % (key, value))
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+
+
+def wait_for_port(timeout=90):
+    """Block until something accepts connections on cmsip:port.
+
+    exec_task() stops the run on a refused connection, which is right for a
+    case but not while waiting for a manager that is still starting.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            socket.create_connection((cmsip, port), timeout=2).close()
+            return True
+        except OSError:
+            time.sleep(1)
+    return False
+
+
+def change_cm_conf(key, value):
+    """Handle a "cm_conf" line of the list: change cm.conf, restart the manager.
+
+    The manager reads cm.conf only at start, so the change needs a restart,
+    and the restart ends every session, the runner's own too. Returns the new
+    token of the runner. prepare_confs() puts cm.conf back at the start of
+    the next run, so a run that stops halfway does not leave the change
+    behind; the list should still undo it at its end.
+    """
+    if not local_env:
+        print("\033[31m%s: \"cm_conf\" needs the manager server on this host "
+              "(%s does not set one up).\033[0m" % (LIST_FILE, REPORT_BASE))
+        sys.exit(1)
+    cubrid_home = os.environ["CUBRID"]
+    set_cm_conf_entry(cubrid_home, key, value)
+    if value is None:
+        print("cm.conf: removed %s" % key)
+    else:
+        print("cm.conf: %s=%s" % (key, value))
+    cubrid_bin = os.path.join(cubrid_home, "bin", "cubrid")
+    run_service_cmd([cubrid_bin, "manager", "stop"], "manager stop")
+    run_service_cmd([cubrid_bin, "manager", "start"], "manager start")
+    if not wait_for_port() or not wait_for_manager():
+        print("\033[31mthe manager server did not start after changing "
+              "cm.conf.\033[0m")
+        sys.exit(1)
+    return login_again()
+
+
+def login_again():
+    """Log the runner in again with the login init_env() used."""
+    data = json.loads(exec_task(cmsip, port, url, json.dumps(login_request))
+                      .decode(errors="replace"))
+    if data.get("status") != "success" or not data.get("token"):
+        print("\033[31mlogin after the manager restart failed: %s\033[0m"
+              % data.get("note", ""))
+        sys.exit(1)
+    return data["token"]
 
 
 def reset_mon_data(cubrid_home):
@@ -1136,6 +1672,71 @@ def diagnose_db_state(task, casefile):
         print("    no server log for %s under %s" % (dbname, logdir))
 
 
+# The cases below rewrite these files under $CUBRID/conf: setsysparam_cmconf and
+# setsysparam_cubridconf replace cm.conf and cubrid.conf, and deletebroker
+# rewrites cubrid_broker.conf even for a broker that does not exist.
+CONF_FILES = ("cm.conf", "cubrid.conf", "cubrid_broker.conf", "autoaddvoldb.conf")
+CONF_BACKUP_NAME = "cmstest_backup"
+
+
+def prepare_confs(cubrid_home):
+    """Start every run from the same CONF_FILES.
+
+    The first run copies them to $CUBRID/conf/cmstest_backup. Later runs find
+    that folder and copy the files back from it, which undoes whatever the
+    previous run did to them. The backup is never removed; delete the folder to
+    take a new one.
+    """
+    confdir = os.path.join(cubrid_home, "conf")
+    backup = os.path.join(confdir, CONF_BACKUP_NAME)
+    if os.path.isdir(backup):
+        for name in os.listdir(backup):
+            shutil.copy2(os.path.join(backup, name), os.path.join(confdir, name))
+        print("restored %s from %s" % (", ".join(sorted(os.listdir(backup))),
+                                       backup))
+        return
+    # Copy next to the final name and rename, so an interrupted copy does not
+    # leave a half-filled folder that the next run would take for the original.
+    partial = backup + ".partial"
+    shutil.rmtree(partial, ignore_errors=True)
+    os.makedirs(partial)
+    for name in CONF_FILES:
+        src = os.path.join(confdir, name)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(partial, name))
+    os.rename(partial, backup)
+    print("backed up %s to %s" % (", ".join(sorted(os.listdir(backup))), backup))
+
+
+def enable_mon_statistic(cubrid_home):
+    """Make sure cm.conf has support_mon_statistic=YES before the manager starts.
+
+    A fresh install ships it as NO, and the manager reads cm.conf only at start,
+    so the setsysparam_cmconf case further down the list comes too late for the
+    monitoring gather that wait_for_mon_data() waits on.
+    """
+    path = os.path.join(cubrid_home, "conf", "cm.conf")
+    if not os.path.isfile(path):
+        return
+    with open(path, "r") as f:
+        lines = f.read().split("\n")
+    key = re.compile(r"^\s*support_mon_statistic\s*[=\s]\s*(\S*)")
+    for i, line in enumerate(lines):
+        m = key.match(line)
+        if m:
+            if m.group(1).upper() == "YES":
+                return
+            lines[i] = "support_mon_statistic=YES"
+            break
+    else:
+        pos = next((i + 1 for i, l in enumerate(lines) if l.strip() == "[cm]"),
+                   len(lines))
+        lines.insert(pos, "support_mon_statistic=YES")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+    print("set support_mon_statistic=YES in %s" % path)
+
+
 def restart_services():
     """Start the run from a known state.
 
@@ -1149,6 +1750,7 @@ def restart_services():
     print("restarting the CUBRID service to start from a known state ...")
     run_service_cmd([cubrid_bin, "service", "stop"], "service stop")
     reset_mon_data(cubrid_home)
+    enable_mon_statistic(cubrid_home)
     run_service_cmd([cubrid_bin, "service", "start"], "service start")
     # demodb is what most of the cases run against; "service start" only starts
     # it when cubrid.conf lists it, so ask for it explicitly.
@@ -1181,6 +1783,8 @@ def stop_services():
 
 
 def init_env():
+    global login_request
+    login_request = load_task(case_path("login"))
     response = do_one_job("login", case_path("login"), "", record_files=False)
     if response["status"] == "failure":
         request = load_task(case_path("login"))
@@ -1199,6 +1803,7 @@ def init_env():
         if response["status"] == "failure":
             print("login failed, cannot run the tests.")
             sys.exit(1)
+        login_request = request
     token = response["token"]
     response = do_one_job("getenv", case_path("getenv"), token,
                           record_files=False)
@@ -1207,6 +1812,7 @@ def init_env():
 
 # Command line:
 #   test_tasks.py [<test set>] [-fc|--file-check] [-ns|--no-sleep]
+#                 [-st|--strict-timeout]
 #   test_tasks.py --dump <case> [<case> ...]
 #
 # <test set> is the list file of the set to run, "task_status_check.txt" by
@@ -1222,7 +1828,11 @@ def init_env():
 # servers whose tasks answer before their work is done; against one that does
 # not, they are only lost time.
 #
-# Both take the CUBRID version the baseline belongs to, "11.4" or "11_4", as a
+# --strict-timeout fails a case whose request ran synchronously past the
+# server's http_timeout (an immediate "note":"timeout"). By default such a case is judged by the
+# job's final result and only listed as a warning at the end of the run.
+#
+# Both -fc and -a take the CUBRID version the baseline belongs to, "11.4" or "11_4", as a
 # bare argument; without one, DEFAULT_VERSION is used. The same request answers
 # differently across engines, so a baseline is only meaningful next to the
 # version it was taken from.
@@ -1238,6 +1848,7 @@ dump_mode = bool(args) and args[0] == "--dump"
 file_check = False
 make_answer = False
 no_sleep = False
+strict_timeout = False
 listarg = DEFAULT_TEST_SET
 VERSION = DEFAULT_VERSION
 
@@ -1250,6 +1861,8 @@ if not dump_mode:
             make_answer = True
         elif arg in ("-ns", "--no-sleep"):
             no_sleep = True
+        elif arg in ("-st", "--strict-timeout"):
+            strict_timeout = True
         elif arg.startswith("-"):
             print("unknown option: %s" % arg)
             sys.exit(2)
@@ -1286,6 +1899,8 @@ if not dump_mode:
         print("no case directory for the set: %s" % CASE_DIR)
         sys.exit(2)
     if local_env:
+        # Before restart_services(), which already edits cm.conf.
+        prepare_confs(os.environ["CUBRID"])
         reset_leftovers()
         restart_services()
     else:
@@ -1332,6 +1947,17 @@ nstatus = sum(1 for r in results if r.get("status_only"))
 if nstatus:
     print("\n\033[33m%d request(s) are marked status only in %s.\033[0m"
           % (nstatus, os.path.basename(LIST_FILE)))
+
+if timeout_fallbacks:
+    print("\n\033[33m%d request(s) ran past http_timeout "
+          "(\"note\":\"timeout\") and were followed to the end (%s):\033[0m"
+          % (len(timeout_fallbacks),
+             "counted as failures, --strict-timeout" if strict_timeout
+             else "judged by the final result; -st fails them"))
+    for item in timeout_fallbacks:
+        print("  \033[33m%s\033[0m (%s): %s after %.0f s, job %s"
+              % (item["name"], item["file"], item["status"], item["elapsed"],
+                 item["uuid"]))
 
 nfailed = sum(1 for r in results if not r["ok"])
 if nfailed:

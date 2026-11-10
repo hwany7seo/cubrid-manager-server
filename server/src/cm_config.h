@@ -28,9 +28,27 @@
 #include <stdio.h>
 #include <limits.h>
 #include "cm_porting.h"
+#include "cm_session_ip.h"
 
 #define MAX_INSTALLED_DB                256
 #define MAX_UNICAS_PROC                 40
+
+#define MIN_MAX_SESSIONS_PER_USER       1       /* max_sessions_per_user: range and default */
+#define MAX_MAX_SESSIONS_PER_USER       64
+#define DEFAULT_MAX_SESSIONS_PER_USER   16
+#define DEFAULT_TOKEN_ACTIVE_TIME       7200    /* token_active_time (seconds): default */
+#define DEFAULT_SESSION_IP_CHECK        SESSION_IP_CHECK_LOG    /* session_ip_check: default */
+#define MAX_NUM_ASYNC_TASK_LIMIT        12
+#define DEFAULT_MAX_NUM_ASYNC_TASK      8       /* default max number of concurrently running async ("async":"yes") jobs */
+
+#define DEFAULT_ASYNC_JOB_TTL_SEC       3600    /* how long a finished async job kept around for gettaskstatus polling */
+#define MIN_ASYNC_JOB_TTL_SEC           60      /* min async job TTL, 60 sec */
+#define MAX_ASYNC_JOB_TTL_SEC           604800  /* max async job TTL, 1 week */
+
+#define DEFAULT_ASYNC_LONG_JOB_SEC      86400   /* 24 hours */
+#define MIN_ASYNC_LONG_JOB_SEC          60      /* min, 60 sec */
+#define MAX_ASYNC_LONG_JOB_SEC          604800  /* 1 week */
+
 
 #define MIN_ENCRYPT_LEN                 32
 #define ENCRYPT_SIGN                    "@"
@@ -364,7 +382,6 @@
 #define UNLOAD_PASSWORD_L                       "password"
 #define UNLOAD_AS_DBA_L                         "as-dba"
 #define UNLOAD_SPLIT_SCHEMA_L                   "split-schema-files"
-#define UNLOAD_SKIP_IDX_DETAIL_L                "skip-index-detail"
 
 /* compactdb option list */
 #define COMPACT_VERBOSE_S                       'v'
@@ -373,6 +390,7 @@
 #define COMPACT_SA_MODE_L                       "SA-mode"
 #define COMPACT_CS_MODE_S                       'C'
 #define COMPACT_CS_MODE_L                       "CS-mode"
+#define COMPACT_INPUT_CLASS_FILE_S              "i"
 
 /* paramdump option list */
 #define PARAMDUMP_BOTH_S                        'b'
@@ -551,6 +569,8 @@ typedef enum
   FID_LOCK_PSVR_DBINFO,
   FID_LOCK_SVR_LOG,
   FID_LOCK_DBMT_PASS,
+  FID_LOCK_AUTO_CONF,
+  FID_LOCK_AUTO_JOBS,
   FID_DIAG_ACTIVITY_LOG,
   FID_DIAG_STATUS_TEMPLATE,
   FID_DIAG_ACTIVITY_TEMPLATE,
@@ -589,14 +609,20 @@ typedef struct
   char szCWMPath[PATH_MAX];
   char szSSLKey[PATH_MAX];
   char szSSLCertificate[PATH_MAX];
-  int iAllow_AdminMultiCon;
+  int iSSLCertAutoGenerate;	/* ssl_cert_auto_generate: TRUE (YES) or FALSE (NO) */
+  char szSSLCertSan[1024];	/* ssl_cert_san: extra subject alternative names, "" for none */
   int iAutoJobTimeout;
   int iCMS_port;
   int iSupportMonStat;
   int iHttpTimeout;
+  int iAsyncJobTtlSec;
+  int iMaxNumAsyncTask;
+  int iAsyncLongJobSec;
   char szAutoUpdateURL[PATH_MAX];
   char szCMSVersion[PATH_MAX];
-  char szTokenActiveTime[PATH_MAX];
+  int iTokenActiveTime;		/* token_active_time (seconds), always > 0 */
+  T_SESSION_IP_CHECK session_ip_check;	/* session_ip_check */
+  char szMaxSessionsPerUser[PATH_MAX];
   int hmtab1, hmtab2, hmtab3, hmtab4;
   char szAccessLog[PATH_MAX];
   char szErrorLog[PATH_MAX];
@@ -620,11 +646,14 @@ extern const char *autounicas_conf_entry[AUTOUNICAS_CONF_ENTRY_NUM];
 extern const char *autobackup_period_type[AUTOBACKUP_PERIOD_TYPE_NUM];
 extern const char *autobackup_period_week[AUTOBACKUP_PERIOD_WEEK_NUM];
 
+#define CUBRID_VERSION_BUILD_LEN	64
+
 extern int cubrid_version_major;
 extern int cubrid_version_minor;
-void find_and_parse_cub_admin_version (int &major_version, int &minor_version);
-#define IS_INVALID_CUBRID_VERS_MAJOR(major)	(major <= 0)
-#define CUBRID_VERS(major,minor)	(major*100 + minor)
+extern char cubrid_version_build[CUBRID_VERSION_BUILD_LEN];
+void find_and_parse_cub_admin_version (int &major_version, int &minor_version, char *build_version,
+				       size_t build_version_size);
+#define CUBRID_VERS(major,minor)	((major)*100 + (minor))
 
 extern int auto_conf_delete (T_DBMT_FILE_ID fid, char *dbname);
 extern int auto_conf_rename (T_DBMT_FILE_ID fid, char *src_dbname,

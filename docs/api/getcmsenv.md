@@ -2,12 +2,14 @@
 
 Get the CUBRID Manager server environment variables.
 
+Permissions required to run this task: none (no login required)
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| token | token returned by login |
 
 
 ## Request Sample
@@ -30,7 +32,10 @@ Get the CUBRID Manager server environment variables.
 | CUBRIDVER | the version of the CUBRID engine |
 | PLATFORM | the processor architecture of the host |
 | cm_port | the port CMS listens on |
-| is_default_cert | yes or no, the SSL certificate in use is still the default one shipped with CMS |
+| is_default_cert | yes or no. yes when the key pair CMS checked at startup is one an earlier version shipped, whose private key is public; this happens only with `ssl_cert_auto_generate=NO` in `cm.conf`. See [TLS Certificate](ssl_certificate.md) |
+
+`is_default_cert` is the result of the check made when CMS started; it does not change until CMS
+restarts, even when [generatecert](generatecert.md) (debug builds) replaces the files.
 
 ## Response Sample
 

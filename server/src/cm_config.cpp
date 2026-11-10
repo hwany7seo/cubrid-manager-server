@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 
 #if defined(WINDOWS)
 #include <process.h>
@@ -45,7 +46,6 @@
 #define DEFAULT_THREAD_NUM       8
 #define DEFAULT_CMS_PORT         8001
 
-#define DEFAULT_ALLOW_MULTI_CON  0    /* no */
 #define DEFAULT_AUTOJOB_TIMEOUT  43200    /* timeout for all autojobs, 12 hours */
 #define MIN_AUTOJOB_TIMEOUT      60    /* min timeout for all autojobs, 60 sec */
 
@@ -53,11 +53,12 @@
 #define MIN_THREAD_NUM           1
 /* Reject multi connection with "ALL USER" */
 
-#define NUM_DBMT_FILE            23
+#define NUM_DBMT_FILE            25
 
 #define DEFAULT_CWM_PATH_SHORT            "/share/webmanager"
 #define DEFAULT_SSL_CERTIFICATE           "cm_ssl_cert.crt"
 #define DEFAULT_SSL_PRIVATEKEY            "cm_ssl_cert.key"
+#define DEFAULT_SSL_CERT_AUTO_GENERATE    TRUE
 
 #define DEFAULT_LOG_FILE_COUNT            10
 #define DEFAULT_LOG_FILE_SIZE             (4 * 1024 * 1024)
@@ -120,6 +121,8 @@ static T_DBMT_FILE_INFO dbmt_file[NUM_DBMT_FILE] =
   {FID_LOCK_PSVR_DBINFO, DBMT_TMP_DIR, "cmdbinfo.lock"},
   {FID_LOCK_SVR_LOG, DBMT_TMP_DIR, "cmlog.lock"},
   {FID_LOCK_DBMT_PASS, DBMT_TMP_DIR, "cmpass.lock"},
+  {FID_LOCK_AUTO_CONF, DBMT_TMP_DIR, "autoconf.lock"},
+  {FID_LOCK_AUTO_JOBS, DBMT_TMP_DIR, "autojobs.lock"},
   {FID_DIAG_ACTIVITY_LOG, DBMT_CONF_DIR, "diagactivitylog.conf"},
   {FID_DIAG_STATUS_TEMPLATE, DBMT_CONF_DIR, "diagstatustemplate.conf"},
   {FID_DIAG_ACTIVITY_TEMPLATE, DBMT_CONF_DIR, "diagactivitytemplate.conf"},
@@ -135,6 +138,9 @@ sys_config sco;
 
 static int check_file (char *fname, char *pname);
 static int check_path (char *path, char *pname);
+static int check_max_sessions_per_user (void);
+static int parse_token_active_time (const char *val);
+static T_SESSION_IP_CHECK parse_session_ip_check (const char *val);
 
 void
 sys_config_init (void)
@@ -223,6 +229,7 @@ uReadSystemConfig (void)
   int str_len = 0;
   char access_log_buf[PATH_MAX];
   char error_log_buf[PATH_MAX];
+  char *saveptr;
 
   conf_file = fopen (conf_get_dbmt_file (FID_DBMT_CONF, cbuf), "rt");
   if (conf_file == NULL)
@@ -232,15 +239,21 @@ uReadSystemConfig (void)
 
   sco.iCMS_port = DEFAULT_CMS_PORT;
   sco.iMonitorInterval = DEFAULT_MONITOR_INTERVAL;
-  sco.iAllow_AdminMultiCon = DEFAULT_ALLOW_MULTI_CON;
   sco.iSupportMonStat = FALSE;
   sco.iHttpTimeout = 30;
+  sco.iAsyncJobTtlSec = DEFAULT_ASYNC_JOB_TTL_SEC;
+  sco.iMaxNumAsyncTask = DEFAULT_MAX_NUM_ASYNC_TASK;
+  sco.iAsyncLongJobSec = DEFAULT_ASYNC_LONG_JOB_SEC;
   sco.iAutoJobTimeout = DEFAULT_AUTOJOB_TIMEOUT;
   sco.iMaxLogFiles = DEFAULT_LOG_FILE_COUNT;
   sco.iMaxLogFileSize = DEFAULT_LOG_FILE_SIZE;
+  sco.iSSLCertAutoGenerate = DEFAULT_SSL_CERT_AUTO_GENERATE;
+  sco.szSSLCertSan[0] = '\0';
   strcpy (sco.szAutoUpdateURL, "");
   strcpy (sco.szCMSVersion, "");
-  strncpy (sco.szTokenActiveTime, "7200", PATH_MAX);
+  sco.iTokenActiveTime = DEFAULT_TOKEN_ACTIVE_TIME;
+  sco.session_ip_check = DEFAULT_SESSION_IP_CHECK;
+  snprintf (sco.szMaxSessionsPerUser, PATH_MAX, "%d", DEFAULT_MAX_SESSIONS_PER_USER);
   snprintf (sco.szCWMPath, PATH_MAX, "%s%s", sco.szCubrid,
 	    DEFAULT_CWM_PATH_SHORT);
 
@@ -252,6 +265,32 @@ uReadSystemConfig (void)
 
   while (fgets (cbuf, sizeof (cbuf), conf_file))
     {
+      size_t len = strlen (cbuf);
+
+      if (len > 0 && cbuf[len - 1] != '\n')
+	{
+	  int ch = fgetc (conf_file);
+
+	  if (ch != EOF && ch != '\n')
+	    {
+	      char err_buf[DBMT_ERROR_MSG_SIZE];
+	      char name[64];
+	      size_t n = strcspn (cbuf, " \t=");
+
+	      while (ch != EOF && ch != '\n')
+		{
+		  ch = fgetc (conf_file);
+		}
+	      strcpy_limit (name, cbuf, (n + 1 < sizeof (name)) ? n + 1 : sizeof (name));
+	      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+			"CUBRID Manager Server : the line of %s in cm.conf is longer than %d characters; it is ignored.\n",
+			name, (int) sizeof (cbuf) - 1);
+	      ut_record_cubrid_utility_log_stderr (err_buf);
+	      continue;
+	    }
+	  /* the line just fits, or is the last one without a newline */
+	}
+
       ut_trim (cbuf);
       if (cbuf[0] == '\0' || cbuf[0] == '#')
 	{
@@ -262,7 +301,7 @@ uReadSystemConfig (void)
       * put the first token into var ent_name,
       * the separator is ' ', '\t', '='
       */
-      if ((token = strtok (cbuf, separator)) == NULL)
+      if ((token = STRTOK (cbuf, separator, &saveptr)) == NULL)
 	{
 	  continue;
 	}
@@ -272,7 +311,7 @@ uReadSystemConfig (void)
       /*
       * put the rest of the string into var ent_val.
       */
-      if ((token = strtok (NULL, "\0")) == NULL)
+      if ((token = STRTOK (NULL, "\0", &saveptr)) == NULL)
 	{
 	  continue;
 	}
@@ -312,18 +351,6 @@ uReadSystemConfig (void)
 	      sco.iMonitorInterval = DEFAULT_MONITOR_INTERVAL;
 	    }
 
-	}
-      else if (strcasecmp (ent_name, "Allow_UserMultiCon") == 0 ||
-	       strcasecmp (ent_name, "allow_user_multi_connection") == 0)
-	{
-	  if (strcasecmp (ent_val, "yes") == 0)
-	    {
-	      sco.iAllow_AdminMultiCon = 1;
-	    }
-	  else
-	    {
-	      sco.iAllow_AdminMultiCon = 0;
-	    }
 	}
       else if (strcasecmp (ent_name, "auto_job_timeout") == 0)
 	{
@@ -373,10 +400,102 @@ uReadSystemConfig (void)
 	      sco.iSupportMonStat = FALSE;
 	    }
 	}
+      else if (strcasecmp (ent_name, "ssl_cert_auto_generate") == 0)
+	{
+	  /*
+	   * An unknown value keeps the default (YES): with NO a missing or
+	   * shipped key pair is not replaced, so a typo must not turn generation off.
+	   */
+	  if (strcasecmp (ent_val, "yes") == 0)
+	    {
+	      sco.iSSLCertAutoGenerate = TRUE;
+	    }
+	  else if (strcasecmp (ent_val, "no") == 0)
+	    {
+	      sco.iSSLCertAutoGenerate = FALSE;
+	    }
+	  else
+	    {
+	      char err_buf[DBMT_ERROR_MSG_SIZE];
+
+	      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+			"CUBRID Manager Server : invalid ssl_cert_auto_generate in cm.conf (%s). "
+			"It must be YES or NO. Using the default YES.\n", ent_val);
+	      ut_record_cubrid_utility_log_stderr (err_buf);
+	      sco.iSSLCertAutoGenerate = DEFAULT_SSL_CERT_AUTO_GENERATE;
+	    }
+	}
+      else if (strcasecmp (ent_name, "ssl_cert_san") == 0)
+	{
+	  /*
+	   * Names and addresses added to the subject alternative names of a
+	   * key pair generated by cub_manager; checked by cm_ssl_cert.cpp, which
+	   * logs the entries it cannot use. Taken from token, not ent_val, which
+	   * is shorter than a list of names may be. A line longer than cbuf is
+	   * ignored above, so token always fits.
+	   */
+	  strcpy_limit (sco.szSSLCertSan, token, sizeof (sco.szSSLCertSan));
+	}
       else if (strcasecmp (ent_name, "http_timeout") == 0 ||
 	       strcasecmp (ent_name, "HttpTimeout") == 0)
 	{
 	  sco.iHttpTimeout = atoi (ent_val);
+	}
+      else if (strcasecmp (ent_name, "async_job_ttl_sec") == 0)
+	{
+	  int ttl = atoi (ent_val);
+	  if (MIN_ASYNC_JOB_TTL_SEC <= ttl && ttl <= MAX_ASYNC_JOB_TTL_SEC)
+	    {
+	      sco.iAsyncJobTtlSec = ttl;
+	    }
+	  else
+	    {
+	      char err_buf[DBMT_ERROR_MSG_SIZE];
+
+	      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+			"CUBRID Manager Server: invalid async_job_ttl_sec in cm.conf (%s). use default (%d)\n",
+			ent_val, DEFAULT_ASYNC_JOB_TTL_SEC);
+	      ut_record_cubrid_utility_log_stderr (err_buf);
+	      sco.iAsyncJobTtlSec = DEFAULT_ASYNC_JOB_TTL_SEC;
+	    }
+	}
+      else if (strcasecmp (ent_name, "max_num_async_task") == 0)
+	{
+	  int max_task = atoi (ent_val);
+	  if (max_task < 1 || max_task > MAX_NUM_ASYNC_TASK_LIMIT)
+	    {
+	      char err_buf[DBMT_ERROR_MSG_SIZE];
+
+	      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+			"CUBRID Manager Server: invalid max_num_async_task in cm.conf (%s). use default (%d)\n",
+			ent_val, DEFAULT_MAX_NUM_ASYNC_TASK);
+	      ut_record_cubrid_utility_log_stderr (err_buf);
+
+	      sco.iMaxNumAsyncTask = DEFAULT_MAX_NUM_ASYNC_TASK;
+	    }
+	  else
+	    {
+	      sco.iMaxNumAsyncTask = max_task;
+	    }
+	}
+      else if (strcasecmp (ent_name, "async_long_job_sec") == 0)
+	{
+	  int long_job_sec = atoi (ent_val);
+
+	  if (MIN_ASYNC_LONG_JOB_SEC <= long_job_sec && long_job_sec <= MAX_ASYNC_LONG_JOB_SEC)
+	    {
+	      sco.iAsyncLongJobSec = long_job_sec;
+	    }
+	  else
+	    {
+	      char err_buf[DBMT_ERROR_MSG_SIZE];
+
+	      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+			"CUBRID Manager Server: invalid async_long_job_sec in cm.conf (%s). use default (%d)\n",
+			ent_val, DEFAULT_ASYNC_LONG_JOB_SEC);
+	      ut_record_cubrid_utility_log_stderr (err_buf);
+	      sco.iAsyncLongJobSec = DEFAULT_ASYNC_LONG_JOB_SEC;
+	    }
 	}
       else if (strcasecmp (ent_name, "auto_update_url") == 0 ||
 	       strcasecmp (ent_name, "AutoUpdateURL") == 0)
@@ -392,7 +511,18 @@ uReadSystemConfig (void)
 	       strcasecmp (ent_name, "TokenActiveTime") == 0)
 	{
 	  ut_trim (ent_val);
-	  snprintf (sco.szTokenActiveTime, PATH_MAX, "%s", ent_val);
+	  sco.iTokenActiveTime = parse_token_active_time (ent_val);
+	}
+      else if (strcasecmp (ent_name, "session_ip_check") == 0)
+	{
+	  ut_trim (ent_val);
+	  sco.session_ip_check = parse_session_ip_check (ent_val);
+	}
+      else if (strcasecmp (ent_name, "max_sessions_per_user") == 0)
+	{
+	  /* checked in uCheckSystemConfig () */
+	  ut_trim (ent_val);
+	  snprintf (sco.szMaxSessionsPerUser, PATH_MAX, "%s", ent_val);
 	}
     }
   fclose (conf_file);
@@ -433,6 +563,11 @@ uCheckSystemConfig (char *progname)
       return -1;
     }
 
+  if (check_max_sessions_per_user () < 0)
+    {
+      return -1;
+    }
+
   /* create tmp directory */
   if (access (sco.dbmt_tmp_dir, F_OK) < 0)
     {
@@ -464,19 +599,14 @@ uCheckSystemConfig (char *progname)
     {
       return -1;
     }
-  /* cubrid manager only support https connections,
-  * Thus private key and certificate must be checked before process starting.
-  */
+  /*
+   * cubrid manager only supports https connections. The private key and
+   * certificate are not checked here: they may not exist yet, and
+   * cm_ssl_cert_ensure () checks, generates or replaces them when the server
+   * starts (start_service ()), and logs why it cannot.
+   */
   snprintf (sco.szSSLKey, PATH_MAX, "%s/conf/%s", sco.szCubrid, DEFAULT_SSL_PRIVATEKEY);
-  if (check_file (sco.szSSLKey, progname) < 0)
-    {
-      return -1;
-    }
   snprintf (sco.szSSLCertificate, PATH_MAX, "%s/conf/%s", sco.szCubrid, DEFAULT_SSL_CERTIFICATE);
-  if (check_file (sco.szSSLCertificate, progname) < 0)
-    {
-      return -1;
-    }
 
 #if !defined (DO_NOT_USE_CUBRIDENV)
   sprintf (filepath, "%s/%s", sco.szCubrid, DBMT_LOG_DIR);
@@ -555,13 +685,30 @@ auto_conf_delete (T_DBMT_FILE_ID fid, char *dbname)
   char conf_dbname[128];
   char strbuf[MAX_JOB_CONFIG_FILE_LINE_LENGTH];
   FILE *infp, *outfp;
+  int fileio_failed = 0;
+
+  /*
+   * the read (infp) - modify (in the fgets/fputs loop below) - write
+   * (move_file ()) sequence has to be atomic with respect to other
+   * threads/processes touching the same auto*.conf file, or a concurrent
+   * writer's change can be silently lost when this function's tmpfile
+   * overwrites it. auto_conf_mutex is shared by all of the auto*.conf
+   * files (addvoldb/backupdb/history/execquery) rather than one mutex per
+   * file: these are low-frequency admin-driven config edits, so a single
+   * coarse lock is simpler and cheap enough.
+   */
+  file_resource_guard guard (*cm_auto_conf_mutex (), FID_LOCK_AUTO_CONF);
+  if (!guard.ok ())
+    {
+      return -1;
+    }
 
   conf_get_dbmt_file (fid, conf_file);
   if ((infp = fopen (conf_file, "r")) == NULL)
     {
       return -1;
     }
-  make_temp_filepath (tmpfile, sco.dbmt_tmp_dir, "DBMT_task_ac_del", TS_AUTOCONF_DELETE, PATH_MAX);
+  gen_tempfile_path (tmpfile, sco.dbmt_tmp_dir, "DBMT_task_ac_del", TS_AUTOCONF_DELETE, PATH_MAX);
   if ((outfp = fopen (tmpfile, "w")) == NULL)
     {
       fclose (infp);
@@ -576,11 +723,39 @@ auto_conf_delete (T_DBMT_FILE_ID fid, char *dbname)
 	}
       if (strcmp (dbname, conf_dbname) != 0)
 	{
-	  fputs (strbuf, outfp);
+	  if (fputs (strbuf, outfp) == EOF)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
     }
+  if (ferror (infp))
+    {
+      /* fgets () can't tell EOF from a read error (NFS drop, bad sector,
+       * ...) - either way the loop just stops, so a read error partway
+       * through would otherwise leave outfp with only the lines read so
+       * far, and fileio_failed alone wouldn't catch it. */
+      fileio_failed = 1;
+    }
   fclose (infp);
-  fclose (outfp);
+  if (fclose (outfp) != 0)
+    {
+      fileio_failed = 1;
+    }
+
+  if (fileio_failed)
+    {
+      /*
+       * outfp's contents are incomplete/unreliable (e.g. disk full, quota
+       * exceeded, other I/O error): never move a possibly-truncated
+       * tmpfile over conf_file, which would silently drop every entry
+       * after the failure point
+       */
+      LOG_ERROR ("auto_conf_delete (): failed writing '%s' while rewriting '%s'; "
+		 "leaving '%s' untouched", tmpfile, conf_file, conf_file);
+      unlink (tmpfile);
+      return -1;
+    }
 
   if (move_file (tmpfile, conf_file) < 0)
     {
@@ -596,13 +771,20 @@ auto_conf_rename (T_DBMT_FILE_ID fid, char *src_dbname, char *dest_dbname)
   char conf_dbname[128];
   char strbuf[1024], *p;
   FILE *infp, *outfp;
+  int fileio_failed = 0;
+
+  file_resource_guard guard (*cm_auto_conf_mutex (), FID_LOCK_AUTO_CONF);
+  if (!guard.ok ())
+    {
+      return -1;
+    }
 
   conf_get_dbmt_file (fid, conf_file);
   if ((infp = fopen (conf_file, "r")) == NULL)
     {
       return -1;
     }
-  make_temp_filepath (tmpfile, sco.dbmt_tmp_dir, "DBMT_task_ac_ren", TS_AUTOCONF_RENAME, PATH_MAX);
+  gen_tempfile_path (tmpfile, sco.dbmt_tmp_dir, "DBMT_task_ac_ren", TS_AUTOCONF_RENAME, PATH_MAX);
   if ((outfp = fopen (tmpfile, "w")) == NULL)
     {
       fclose (infp);
@@ -619,15 +801,36 @@ auto_conf_rename (T_DBMT_FILE_ID fid, char *src_dbname, char *dest_dbname)
 	{
 	  p = strstr (strbuf, src_dbname);
 	  p += strlen (src_dbname);
-	  fprintf (outfp, "%s%s", dest_dbname, p);
+	  if (fprintf (outfp, "%s%s", dest_dbname, p) < 0)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
       else
 	{
-	  fputs (strbuf, outfp);
+	  if (fputs (strbuf, outfp) == EOF)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
     }
+  if (ferror (infp))
+    {
+      fileio_failed = 1;
+    }
   fclose (infp);
-  fclose (outfp);
+  if (fclose (outfp) != 0)
+    {
+      fileio_failed = 1;
+    }
+
+  if (fileio_failed)
+    {
+      LOG_ERROR ("auto_conf_rename (): failed writing '%s' while rewriting '%s'; "
+		 "leaving '%s' untouched", tmpfile, conf_file, conf_file);
+      unlink (tmpfile);
+      return -1;
+    }
 
   if (move_file (tmpfile, conf_file) < 0)
     {
@@ -646,13 +849,20 @@ auto_conf_execquery_update_dbuser (const char *src_db_uid,
   char *strbuf, *p;
   int buf_len, get_len;
   FILE *conf_file, *tmpfile;
+  int fileio_failed = 0;
+
+  file_resource_guard guard (*cm_auto_conf_mutex (), FID_LOCK_AUTO_CONF);
+  if (!guard.ok ())
+    {
+      return -1;
+    }
 
   conf_get_dbmt_file (FID_AUTO_EXECQUERY_CONF, conf_file_path);
   if ((conf_file = fopen (conf_file_path, "r")) == NULL)
     {
       return -1;
     }
-  make_temp_filepath (tmpfile_path, sco.dbmt_tmp_dir, "DBMT_task_ac_swit", TS_AUTOCONF_SWIT, PATH_MAX);
+  gen_tempfile_path (tmpfile_path, sco.dbmt_tmp_dir, "DBMT_task_ac_swit", TS_AUTOCONF_SWIT, PATH_MAX);
   if ((tmpfile = fopen (tmpfile_path, "w")) == NULL)
     {
       fclose (conf_file);
@@ -664,7 +874,7 @@ auto_conf_execquery_update_dbuser (const char *src_db_uid,
   while ((get_len = ut_getline (&strbuf, &buf_len, conf_file)) != -1)
     {
       if (sscanf
-	  (strbuf, "%64s %64s %64s %*s %64s", dbname, query_id, db_uid, dbmt_uid) < 4)
+	  (strbuf, "%63s %63s %63s %*s %63s", dbname, query_id, db_uid, dbmt_uid) < 4)
 	{
 	  continue;
 	}
@@ -676,12 +886,18 @@ auto_conf_execquery_update_dbuser (const char *src_db_uid,
 	    {
 	      p = strchr (p, ' ');
 	    }
-	  fprintf (tmpfile, "%s %s %s %s %s%s", dbname, query_id, dest_db_uid,
-		   dest_db_passwd, dbmt_uid, p);
+	  if (fprintf (tmpfile, "%s %s %s %s %s%s", dbname, query_id, dest_db_uid,
+		       dest_db_passwd, dbmt_uid, p) < 0)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
       else
 	{
-	  fputs (strbuf, tmpfile);
+	  if (fputs (strbuf, tmpfile) == EOF)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
       FREE_MEM (strbuf);
       buf_len = 0;
@@ -692,8 +908,32 @@ auto_conf_execquery_update_dbuser (const char *src_db_uid,
       FREE_MEM (strbuf);
     }
 
+  if (ferror (conf_file) || !feof (conf_file))
+    {
+      /*
+       * ut_getline ()/ut_getdelim () can return -1 without the loop
+       * having reached EOF: a line over MAX_LINE (cm_server_util.cpp)
+       * or a realloc () failure both give up mid-file, and neither
+       * ever fails a read on conf_file, so ferror () alone stays 0.
+       * !feof () catches those too - feof () is only set on the one
+       * path that really did read to the end of the file.
+       */
+      fileio_failed = 1;
+    }
   fclose (conf_file);
-  fclose (tmpfile);
+  if (fclose (tmpfile) != 0)
+    {
+      fileio_failed = 1;
+    }
+
+  if (fileio_failed)
+    {
+      LOG_ERROR ("auto_conf_execquery_update_dbuser (): failed writing '%s' while "
+		 "rewriting '%s'; leaving '%s' untouched",
+		 tmpfile_path, conf_file_path, conf_file_path);
+      unlink (tmpfile_path);
+      return -1;
+    }
 
   if (move_file (tmpfile_path, conf_file_path) < 0)
     {
@@ -711,13 +951,20 @@ auto_conf_execquery_delete_by_dbuser (const char *target_db_uid)
   char *strbuf;
   int buf_len, get_len;
   FILE *conf_file, *tmpfile;
+  int fileio_failed = 0;
+
+  file_resource_guard guard (*cm_auto_conf_mutex (), FID_LOCK_AUTO_CONF);
+  if (!guard.ok ())
+    {
+      return -1;
+    }
 
   conf_get_dbmt_file (FID_AUTO_EXECQUERY_CONF, conf_file_path);
   if ((conf_file = fopen (conf_file_path, "r")) == NULL)
     {
       return -1;
     }
-  make_temp_filepath (tmpfile_path, sco.dbmt_tmp_dir, "DBMT_task_ac_del_user", TS_DELETEDBMTUSER, PATH_MAX);
+  gen_tempfile_path (tmpfile_path, sco.dbmt_tmp_dir, "DBMT_task_ac_del_user", TS_DELETEDBMTUSER, PATH_MAX);
   if ((tmpfile = fopen (tmpfile_path, "w")) == NULL)
     {
       fclose (conf_file);
@@ -728,7 +975,7 @@ auto_conf_execquery_delete_by_dbuser (const char *target_db_uid)
   buf_len = get_len = 0;
   while ((get_len = ut_getline (&strbuf, &buf_len, conf_file)) != -1)
     {
-      if (sscanf (strbuf, "%*s %*s %64s", db_uid) < 1)
+      if (sscanf (strbuf, "%*s %*s %63s", db_uid) < 1)
 	{
 	  continue;
 	}
@@ -739,7 +986,10 @@ auto_conf_execquery_delete_by_dbuser (const char *target_db_uid)
 	}
       else
 	{
-	  fputs (strbuf, tmpfile);
+	  if (fputs (strbuf, tmpfile) == EOF)
+	    {
+	      fileio_failed = 1;
+	    }
 	}
       FREE_MEM (strbuf);
       buf_len = 0;
@@ -750,8 +1000,24 @@ auto_conf_execquery_delete_by_dbuser (const char *target_db_uid)
       FREE_MEM (strbuf);
     }
 
+  if (ferror (conf_file) || !feof (conf_file))
+    {
+      fileio_failed = 1;
+    }
   fclose (conf_file);
-  fclose (tmpfile);
+  if (fclose (tmpfile) != 0)
+    {
+      fileio_failed = 1;
+    }
+
+  if (fileio_failed)
+    {
+      LOG_ERROR ("auto_conf_execquery_delete_by_dbuser (): failed writing '%s' while "
+		 "rewriting '%s'; leaving '%s' untouched",
+		 tmpfile_path, conf_file_path, conf_file_path);
+      unlink (tmpfile_path);
+      return -1;
+    }
 
   if (move_file (tmpfile_path, conf_file_path) < 0)
     {
@@ -761,17 +1027,112 @@ auto_conf_execquery_delete_by_dbuser (const char *target_db_uid)
   return 0;
 }
 
+/*
+ * check_max_sessions_per_user () - max_sessions_per_user of cm.conf must be
+ *   an integer from MIN_MAX_SESSIONS_PER_USER to MAX_MAX_SESSIONS_PER_USER.
+ *   Any other value is an error and CMS does not start: it limits the
+ *   sessions of every user, so a typo must not be replaced silently by some
+ *   other limit.
+ */
+static int
+check_max_sessions_per_user (void)
+{
+  char err_buf[DBMT_ERROR_MSG_SIZE];
+  const char *val = sco.szMaxSessionsPerUser;
+  char *end = NULL;
+  long n;
+
+  errno = 0;
+  n = strtol (val, &end, 10);
+  if (val[0] == '\0' || end == NULL || *end != '\0' || errno == ERANGE
+      || n < MIN_MAX_SESSIONS_PER_USER || n > MAX_MAX_SESSIONS_PER_USER)
+    {
+      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+		"CUBRID Manager Server : invalid max_sessions_per_user in cm.conf (%s). "
+		"It must be an integer from %d to %d.\n",
+		val, MIN_MAX_SESSIONS_PER_USER, MAX_MAX_SESSIONS_PER_USER);
+      ut_record_cubrid_utility_log_stderr (err_buf);
+      return -1;
+    }
+
+  return 0;
+}
+
+/*
+ * parse_token_active_time () - token_active_time in seconds.
+ *   It must be an integer from 1 to INT_MAX. Any other value is logged and
+ *   the default (DEFAULT_TOKEN_ACTIVE_TIME) is used, as before, so that an
+ *   existing cm.conf keeps working. This is the only place that interprets
+ *   token_active_time; the session code uses sco.iTokenActiveTime.
+ */
+static int
+parse_token_active_time (const char *val)
+{
+  char err_buf[DBMT_ERROR_MSG_SIZE];
+  char *end = NULL;
+  long n;
+
+  errno = 0;
+  n = strtol (val, &end, 10);
+  if (val[0] == '\0' || end == NULL || *end != '\0' || errno == ERANGE
+      || n < 1 || n > INT_MAX)
+    {
+      snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+		"CUBRID Manager Server : invalid token_active_time in cm.conf (%s). "
+		"It must be an integer from 1 to %d. Using the default %d.\n",
+		val, INT_MAX, DEFAULT_TOKEN_ACTIVE_TIME);
+      ut_record_cubrid_utility_log_stderr (err_buf);
+      return DEFAULT_TOKEN_ACTIVE_TIME;
+    }
+
+  return (int) n;
+}
+
+/*
+ * parse_session_ip_check () - session_ip_check: off, log or enforce, in any
+ *   case. Any other value is logged and the default
+ *   (DEFAULT_SESSION_IP_CHECK, log) is used: CMS still starts, and the
+ *   default only adds log messages, so a typo does not stop requests.
+ */
+static T_SESSION_IP_CHECK
+parse_session_ip_check (const char *val)
+{
+  char err_buf[DBMT_ERROR_MSG_SIZE];
+
+  if (strcasecmp (val, "off") == 0)
+    {
+      return SESSION_IP_CHECK_OFF;
+    }
+  if (strcasecmp (val, "log") == 0)
+    {
+      return SESSION_IP_CHECK_LOG;
+    }
+  if (strcasecmp (val, "enforce") == 0)
+    {
+      return SESSION_IP_CHECK_ENFORCE;
+    }
+
+  snprintf (err_buf, DBMT_ERROR_MSG_SIZE,
+	    "CUBRID Manager Server : invalid session_ip_check in cm.conf (%s). "
+	    "It must be off, log or enforce. Using the default log.\n", val);
+  ut_record_cubrid_utility_log_stderr (err_buf);
+
+  return DEFAULT_SESSION_IP_CHECK;
+}
+
 static int
 check_file (char *fname, char *pname)
 {
   char tmpstrbuf[DBMT_ERROR_MSG_SIZE];
+  char errbuf[CM_STRERROR_BUF_LEN];
 
   tmpstrbuf[0] = '\0';
 
   if (access (fname, F_OK | R_OK | W_OK) < 0)
     {
       snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE,
-		"CUBRID Manager Server : %s - %s. - %s\n", fname, strerror (errno), pname);
+		"CUBRID Manager Server : %s - %s. - %s\n", fname,
+		STRERROR_R (errno, errbuf, sizeof (errbuf)), pname);
       ut_record_cubrid_utility_log_stderr (tmpstrbuf);
       return -1;
     }
@@ -783,13 +1144,15 @@ check_path (char *dirname, char *pname)
 {
   /* check if directory exists */
   char tmpstrbuf[DBMT_ERROR_MSG_SIZE];
+  char errbuf[CM_STRERROR_BUF_LEN];
 
   tmpstrbuf[0] = '\0';
 
   if (access (dirname, F_OK | W_OK | R_OK | X_OK) < 0)
     {
       snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE,
-		"CUBRID Manager Server :  %s - %s. - %s\n", dirname, strerror (errno), pname);
+		"CUBRID Manager Server :  %s - %s. - %s\n", dirname,
+		STRERROR_R (errno, errbuf, sizeof (errbuf)), pname);
       ut_record_cubrid_utility_log_stderr (tmpstrbuf);
       return -1;
     }

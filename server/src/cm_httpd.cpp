@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <signal.h>
 #include <string.h>
+#include <stdexcept>
 #include <event2/event.h>
 #include <evhttp.h>
 #include <event2/buffer.h>
@@ -65,16 +66,12 @@
 #include "cm_server_interface.h"
 #include "cm_server_stat.h"
 #include "cm_server_extend_interface.h"
+#include "cm_user.h"
+#include "cm_session_ip.h"
 #include "cm_mon_stat.h"
 #include "cm_http_server.h"
+#include "cm_ssl_cert.h"
 
-#if _MSC_VER >= 1900
-extern "C" {
-  FILE __iob_func[3] = { *stdin, *stdout, *stderr };
-}
-#endif
-
-//#include "cm_utf8.h"
 using namespace std;
 
 #define DEFAULT_THRD_NUM                      24
@@ -85,8 +82,6 @@ using namespace std;
 static THREAD_FUNC automation_start (void *ud);
 static THREAD_FUNC aj_thread_r (void *aj);
 static void start_auto_thread (void);
-
-T_EMGR_VERSION CLIENT_VERSION = EMGR_MAKE_VER (8, 4);
 
 #ifdef WINDOWS
 T_THREAD auto_task_tid = NULL;
@@ -121,8 +116,14 @@ struct worker_context
 #endif
 };
 
-int cubrid_version_major = -1;
-int cubrid_version_minor = -1;
+/*
+ * When the CMS starts, it gets the currently installed engine version.
+ * if this fails, it sets the default value to 11.4.
+ * This value is used in APIs such as dbspaceinfo.
+ */
+int cubrid_version_major = 11;
+int cubrid_version_minor = 4;
+char cubrid_version_build[CUBRID_VERSION_BUILD_LEN] = "";
 
 int
 bind_socket (int port)
@@ -203,10 +204,109 @@ dispatch_thread (void *arg)
 #endif
 }
 
+/*
+ * cub_strip_internal_keys () - remove every member whose name starts with '_'
+ *   from the request JSON, recursively (nested objects and array elements).
+ *
+ * Keys beginning with '_' are reserved for values the server injects
+ * (_ID, _IP, _PORT, _TOKEN, _TASK, _DBID, _DBPASSWD, _DBNAME, _CLIENTIP, ...). A client must
+ * not be able to supply them. json_to_nv () flattens nested objects into one
+ * nvplist and nv_get_val () returns the first match, so stripping only the top
+ * level would let a client smuggle an internal key inside a nested object and
+ * have it win over the value the server sets. Strip them at every level.
+ */
+static void
+cub_strip_internal_keys (Json::Value &node)
+{
+  if (node.isObject ())
+    {
+      Json::Value::Members members (node.getMemberNames ());
+      for (Json::Value::Members::iterator it = members.begin ();
+	   it != members.end (); ++it)
+	{
+	  if (!it->empty () && (*it)[0] == '_')
+	    {
+	      node.removeMember (*it);
+	    }
+	  else
+	    {
+	      cub_strip_internal_keys (node[*it]);
+	    }
+	}
+    }
+  else if (node.isArray ())
+    {
+      for (Json::Value::ArrayIndex i = 0; i < node.size (); ++i)
+	{
+	  cub_strip_internal_keys (node[i]);
+	}
+    }
+}
+
+/*
+ * cub_accept_legacy_db_keys () - compatibility for clients that still send
+ *   the DB login as internal keys.
+ *
+ * CUBRID Admin sends loaddb with _DBID/_DBPASSWD and killtransaction with
+ * _DBPASSWD. Internal keys are stripped from every request, so take these
+ * over as the public keys dbuser/dbpasswd first; the request processing then
+ * hands them to the task as before. Only top-level string values of these
+ * two tasks are taken, a public key the request already has wins, and
+ * nothing else is accepted: internal keys anywhere else are still dropped.
+ *
+ * TODO: remove in the next release, once CUBRID Admin sends dbuser/dbpasswd.
+ */
+static void
+cub_accept_legacy_db_key (Json::Value &root, const char *legacy_key,
+			  const char *public_key)
+{
+  if (root.isMember (legacy_key) && root[legacy_key].isString ()
+      && !root.isMember (public_key))
+    {
+      root[public_key] = root[legacy_key].asString ();
+    }
+}
+
+static void
+cub_accept_legacy_db_keys (Json::Value &root)
+{
+  if (!root.isObject () || !root.isMember ("task") || !root["task"].isString ())
+    {
+      return;
+    }
+
+  const std::string task = root["task"].asString ();
+
+  if (task == "loaddb")
+    {
+      cub_accept_legacy_db_key (root, "_DBID", "dbuser");
+      cub_accept_legacy_db_key (root, "_DBPASSWD", "dbpasswd");
+    }
+  else if (task == "killtransaction")
+    {
+      cub_accept_legacy_db_key (root, "_DBPASSWD", "dbpasswd");
+    }
+}
+
 void
 cub_add_private_param (struct evhttp_request *req, Json::Value &root)
 {
-  root["_CLIENTIP"] = req->remote_host;
+  char client_ip[DBMT_USER_IP_LEN];
+
+  /*
+   * _CLIENTIP is the address of the connection this request came on, in the
+   * standard form of ut_normalize_ip (): login stores it in the session, and
+   * the access and error logs write it. An address that cannot be
+   * normalized is kept as it is, so that the logs show what was received.
+   */
+  if (ut_normalize_ip (req->remote_host, client_ip, sizeof (client_ip)))
+    {
+      root["_CLIENTIP"] = client_ip;
+    }
+  else
+    {
+      root["_CLIENTIP"] = req->remote_host;
+    }
   root["_CLIENTPORT"] = req->remote_port;
   root["_STAMP"] = 1;
   root["_PROGNAME"] = CMS_NAME;
@@ -266,13 +366,30 @@ cub_generic_request_handler (struct evhttp_request *req, void *arg)
       return;
     }
 
-  if (!reader.parse (body, root))
+  /*
+   * A request is a JSON object. Anything else is refused here: the code
+   * below indexes the root by key, which throws for an array or a scalar,
+   * and nothing on this path would catch it.
+   */
+  if (!reader.parse (body, root) || !root.isObject ())
     {
       free (body);
       //utf8_clean(inustr);
       evhttp_send_reply (req, HTTP_BADREQUEST, "Error JSON format", NULL);
       return;
     }
+
+  /*
+   * Take over the DB login keys older clients send for loaddb and
+   * killtransaction before they are dropped below (compatibility).
+   */
+  cub_accept_legacy_db_keys (root);
+
+  /*
+   * Drop any '_'-prefixed key the client sent (at any nesting level) before
+   * the server injects its own. After this point every '_' key is server-set.
+   */
+  cub_strip_internal_keys (root);
 
   cub_add_private_param (req, root);
 
@@ -282,7 +399,25 @@ cub_generic_request_handler (struct evhttp_request *req, void *arg)
       return evhttp_send_reply (req, HTTP_BADREQUEST, "", NULL);
     }
 
-  cub_cm_request_handler (root, response);
+  try
+    {
+      cub_cm_request_handler (root, response);
+    }
+  catch (const std::exception &e)
+    {
+      LOG_ERROR ("cub_generic_request_handler : unhandled exception while "
+		 "processing request: %s", e.what ());
+      response = Json::Value (Json::objectValue);
+      build_server_header (response, ERR_WITH_MSG, e.what ());
+    }
+  catch (...)
+    {
+      LOG_ERROR ("cub_generic_request_handler : unhandled non-standard "
+		 "exception while processing request.");
+      response = Json::Value (Json::objectValue);
+      build_server_header (response, ERR_WITH_MSG, "internal server error");
+    }
+
   evb = evbuffer_new ();
   if (NULL == evb)
     {
@@ -361,7 +496,8 @@ cub_post_request_handler (struct evhttp_request *req, void *arg)
 
   cookie.copy (token, TOKEN_ENC_LENGTH - 1, token_pos + strlen ("token="));
   token[TOKEN_ENC_LENGTH - 1] = '\0';
-  if (!ext_ut_validate_token (token))
+  /* remote_host: the address of this connection, as for _CLIENTIP */
+  if (!ext_ut_validate_token (token, req->remote_host))
     {
       goto send_nok_reply;
     }
@@ -484,24 +620,59 @@ start_monitor_auto_jobs_cb (evutil_socket_t fd, short event, void *arg)
     }
 #endif
 
+  /*
+   * Expired sessions are otherwise removed only when a request uses one or a
+   * new login comes in; drop them here too, every cm_process_monitor_interval
+   * seconds, so that their DB passwords do not stay in memory.
+   */
+  dbmt_user_purge_expired_sessions (time (NULL));
+
   evtimer_add (work_ctx->timer, &auto_task_tv);
 }
+
+/*
+ * write end of the pipe on which the daemon reports its start to the parent
+ * of ut_daemon_start (), which waits for it; -1 once reported or when none
+ */
+static int daemon_ready_fd = -1;
 
 int
 start_service ()
 {
   struct worker_context *start_ctx[DEFAULT_THRD_NUM];
   char tmpstrbuf[DBMT_ERROR_MSG_SIZE];
+  char ssl_err[DBMT_ERROR_MSG_SIZE];
   int nfd, err, i = 0;
 
   tmpstrbuf[0] = '\0';
+  ssl_err[0] = '\0';
 #ifdef WINDOWS
   wsa_initialize ();
 #endif
 
   thread_setup_SSL ();
 
+  /*
+   * Keep, generate or replace the key pair before TLS loads it. On failure
+   * print why, and do not start; what to do is in the error log.
+   */
+  if (cm_ssl_cert_ensure (sco.szSSLCertificate, sco.szSSLKey, sco.iSSLCertAutoGenerate == TRUE, sco.szSSLCertSan, ssl_err,
+			  sizeof (ssl_err)) != 0)
+    {
+      snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE, "CUBRID Manager Server : %s. See %s for what to do.\n", ssl_err,
+		sco.szErrorLog);
+      ut_record_cubrid_utility_log_stderr (tmpstrbuf);
+      return -1;
+    }
+
   SSL_CTX *ctx = init_SSL (sco.szSSLCertificate, sco.szSSLKey);
+  if (ctx == NULL)
+    {
+      snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE,
+		"CUBRID Manager Server : cannot initialize SSL context");
+      ut_record_cubrid_utility_log_stderr (tmpstrbuf);
+      return -1;
+    }
 
   nfd = bind_socket (sco.iCMS_port);
 
@@ -603,6 +774,9 @@ start_service ()
 		      (void *) start_ctx[i]);
 #endif
     }
+
+  /* the server serves: let the parent of ut_daemon_start () exit with 0 */
+  ut_daemon_started (&daemon_ready_fd);
 
   for (i = 0; i < DEFAULT_THRD_NUM; i++)
     {
@@ -899,7 +1073,17 @@ main (int argc, char **argv)
       return 0;
     }
 
-  ut_daemon_start ();
+  ut_daemon_start (&daemon_ready_fd);
+
+  /* One cub_manager per configuration. Take the lock before touching any shared file. */
+  if (cm_ssl_cert_lock_process (sco.szSSLKey, tmpstrbuf, sizeof (tmpstrbuf)) != 0)
+    {
+      char msg[DBMT_ERROR_MSG_SIZE];
+
+      snprintf (msg, DBMT_ERROR_MSG_SIZE, "CUBRID Manager Server : %s.\n", tmpstrbuf);
+      ut_record_cubrid_utility_log_stderr (msg);
+      exit (1);
+    }
 
   init_files ();
 
@@ -917,10 +1101,18 @@ main (int argc, char **argv)
 
   start_auto_thread ();
 
-  find_and_parse_cub_admin_version (cubrid_version_major, cubrid_version_minor);
-  LOG_INFO ("started '%s' with Engine Version: %d.%d", argv[0], cubrid_version_major, cubrid_version_minor);
+  find_and_parse_cub_admin_version (cubrid_version_major, cubrid_version_minor, cubrid_version_build,
+				    sizeof (cubrid_version_build));
+  LOG_INFO ("started '%s' with Engine Version: %d.%d (%s)", argv[0], cubrid_version_major, cubrid_version_minor,
+	    cubrid_version_build);
 
-  start_service ();
+  if (start_service () < 0)
+    {
+      snprintf (tmpstrbuf, DBMT_ERROR_MSG_SIZE,
+		"CUBRID Manager Server : Fail to start service");
+      ut_record_cubrid_utility_log_stderr (tmpstrbuf);
+      exit (1);
+    }
 
   return 0;
 }

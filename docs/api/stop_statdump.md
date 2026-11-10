@@ -2,15 +2,20 @@
 
 Related with [start_statdump](start_statdump.md), deactivate the previously started *statdump* process
 
+Permissions required to run this task: one of DBC, DBO, MON
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| token | token returned by login |
 | dbname | database name to stop statdump process running on the dbname |
 | dbuser | database username |
 | dbpasswd | password of dbuser |
+| async | default "no", if "yes" run the task in asynchronous mode |
+
+* The status of a task running in asynchronous mode can be checked using the 'gettaskstatus' api
 
 ## Request Sample
 
@@ -20,7 +25,8 @@ Related with [start_statdump](start_statdump.md), deactivate the previously star
   "token": "cdfb4c5717170c5e9c6856b4d1c61ee8132bcc7d82bd609066ed9ece2554c47f7926f07dd201b6aa",
   "dbname": "demodb",
   "dbuser":"dba",
-  "dbpasswd":""
+  "dbpasswd":"",
+  "async":"yes"
 }
 ```
 
@@ -40,5 +46,16 @@ Related with [start_statdump](start_statdump.md), deactivate the previously star
   "note" : "demodb",
   "status" : "success",
   "task" : "stop_statdump"
+}
+```
+
+## Response Sample (async mode)
+```
+{
+   "job-status" : "running",
+   "note" : "none",
+   "status" : "success",
+   "task" : "stop_statdump",
+   "uuid" : "1877908931382247367"
 }
 ```

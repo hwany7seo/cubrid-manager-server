@@ -77,6 +77,9 @@ int ext_add_dbmt_user_new (Json::Value &request, Json::Value &response);
 int ext_update_dbmt_user_new (Json::Value &request, Json::Value &response);
 int ext_get_dbmt_user_info_new (Json::Value &request,
 				Json::Value &response);
+int ext_force_logout (Json::Value &request, Json::Value &response);
+int ext_get_server_status (Json::Value &request, Json::Value &response); /* defined in cm_server_interface.cpp */
+int ext_get_server_info (Json::Value &request, Json::Value &response); /* defined in cm_server_interface.cpp */
 
 #define EXT_JOBS_AUTO_START      "auto_start"
 #define EXT_JOBS_MAIL_CONF       "mail_config"
@@ -84,18 +87,22 @@ int ext_get_dbmt_user_info_new (Json::Value &request,
 
 /* utility */
 bool ext_set_auto_jobs (const std::string jobkey, Json::Value &jobvalue);
-bool ext_get_auto_jobs (const std::string jobkey, Json::Value &jobvalue);
+bool ext_get_auto_jobs (const std::string jobkey, Json::Value &jobvalue, bool *file_existed = NULL);
 bool ext_ut_validate_userid (const std::string userid);
 int ext_ut_add_dblist_to_response (Json::Value &res, bool is_add_dbpath =
     false);
 int ext_ut_add_userlist_to_response (Json::Value &response,
-				     const T_DBMT_USER &dbmt_user,
-				     bool is_add_pwd = false);
+				     const T_DBMT_USER &dbmt_user);
 std::string ext_ut_generate_token (const std::string &client_ip,
 				   const std::string &client_id, int proc_id,
 				   time_t login_time);
 int ext_ut_validate_token (Json::Value &resquest, Json::Value &response);
-bool ext_ut_validate_token (const char *token);
+#if !defined (NDEBUG)
+/* /upload, debug builds only */
+bool ext_ut_validate_token (const char *token, const char *request_ip);
+#endif
 bool ext_ut_validate_auth (Json::Value &request);
+void ext_ut_access_log (const Json::Value &request, const char *msg);
+void ext_ut_error_log (const Json::Value &request, const char *msg);
 
 #endif

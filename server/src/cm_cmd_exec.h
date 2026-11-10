@@ -28,6 +28,7 @@
 #include <time.h>
 
 #include "cm_dep.h"
+#include "cm_stat.h"
 
 #if defined(WINDOWS)
 #define DBMT_EXE_EXT        ".exe"
@@ -182,6 +183,7 @@ class GeneralSpacedbResult
     virtual int get_cnt_tpage() = 0;
     virtual void get_total_and_free_page (const char *type, double &free_page, double &total_page) = 0;
     virtual time_t get_my_time (char *dbloca) = 0;
+    virtual bool get_last_volume_name (const char *type, char *buf, size_t buf_size) = 0;
     virtual void auto_add_volume (autoaddvoldb_node *current, int db_mode, char *dbname) = 0;
     virtual void read_spacedb_output (FILE *fp) = 0;
     virtual ~GeneralSpacedbResult() {}
@@ -205,6 +207,7 @@ class SpaceDbResultNewFormat : public GeneralSpacedbResult
 	}
     }
     time_t get_my_time (char *dbloca);
+    bool get_last_volume_name (const char *type, char *buf, size_t buf_size);
     void auto_add_volume (autoaddvoldb_node *current, int db_mode, char *dbname);
     void read_spacedb_output (FILE *fp);
     void create_result (nvplist *res);
@@ -256,6 +259,7 @@ class SpaceDbResultOldFormat : public GeneralSpacedbResult
     }
     int get_cnt_tpage();
     time_t get_my_time (char *dbloca);
+    bool get_last_volume_name (const char *type, char *buf, size_t buf_size);
     void auto_add_volume (autoaddvoldb_node *current, int db_mode, char *dbname);
     void read_spacedb_output (FILE *);
   private:
@@ -275,5 +279,56 @@ char *cubrid_cmd_name (char *buf);
 int read_error_file (const char *err_file, char *err_buf, int err_buf_size);
 int read_error_file2 (char *err_file, char *err_buf, int err_buf_size, int *err_code);
 int read_csql_error_file (char *err_file, char *err_buf, int err_buf_size);
+
+/*
+ * opcodes understood by cub_jobsa. These must stay numerically identical to
+ * cm_common/cm_execute_sa.h
+ */
+#if !defined (OPTIMIZE_CLASS_NAME_L)
+#define OPTIMIZE_CLASS_NAME_L       "class-name"
+#endif
+#define CMS_EMS_SA_CLASS_INFO       1
+
+/*
+ * cmd_class_info_sa () / cmd_get_triggerinfo_sa () / cmd_optimizedb_sa () -
+ * SA-mode counterparts of "classinfo", "gettriggerinfo" and "optimizedb"
+ * for a database that is not currently running as a server.
+ */
+int cmd_class_info_sa (const char *dbname, const char *uid, const char *passwd,
+		       const char *cli_ver_val, nvplist *out, char *_dbmt_error);
+int cmd_get_triggerinfo_sa (const char *dbname, const char *uid, const char *passwd,
+			    nvplist *res, char *_dbmt_error);
+int cmd_optimizedb_sa (const char *dbname, const char *classname, char *_dbmt_error);
+
+/*
+ * cmd_cms_server_status () - CMS-native port of CUBRID engine's
+ * cm_common/cm_utils.c:cmd_server_status (). Runs `cubrid server status`
+ * and parses its output into the same T_SERVER_STATUS_RESULT /
+ * T_SERVER_STATUS_INFO shape the engine's version returns
+ */
+T_SERVER_STATUS_RESULT *cmd_cms_server_status (void);
+void cmd_cms_result_free (T_SERVER_STATUS_RESULT *res);
+
+/*
+ * cms_is_database_active () / cms_database_mode () - CMS-native ports of
+ * CUBRID engine's cm_common/cm_utils.c:uIsDatabaseActive ()/uDatabaseMode ().
+ */
+int cms_is_database_active (char *dbn);
+T_DB_SERVICE_MODE cms_database_mode (char *dbname, int *ha_mode);
+
+/*
+ * cms_get_db_proc_stat () / cms_get_db_proc_stat_all () /
+ * cms_get_host_disk_partition_stat () / cms_get_db_exec_stat () /
+ * cms_db_proc_stat_all_free () -
+ * CMS-native ports of CUBRID engine's cm_common/cm_mem_cpu_stat.c functions
+ * of (almost) the same name - see cm_mem_cpu_stat.cpp.
+ */
+int cms_get_db_proc_stat (const char *db_name, T_CM_DB_PROC_STAT *stat, T_CM_ERROR *err_buf);
+T_CM_DB_PROC_STAT_ALL *cms_get_db_proc_stat_all (T_CM_ERROR *err_buf);
+void cms_db_proc_stat_all_free (T_CM_DB_PROC_STAT_ALL *stat);
+int cms_get_db_exec_stat (const char *db_name, T_CM_DB_EXEC_STAT *exec_stat, T_CM_ERROR *err_buf);
+#if defined (ENABLE_UNUSED_FUNCTION)
+T_CM_DISK_PARTITION_STAT_ALL *cms_get_host_disk_partition_stat (T_CM_ERROR *err_buf);
+#endif
 
 #endif                /* _CM_COMMAND_EXECUTE_H_ */

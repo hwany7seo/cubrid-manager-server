@@ -32,10 +32,17 @@
 #include <unistd.h>
 #endif
 
+#include <deque>
+#include <map>
+#include <string>
+#include <utility>
+#include <new>
+
 #include "cm_porting.h"
 #include "cm_config.h"
 #include "cm_server_util.h"
 #include "cm_user.h"
+#include "cm_session_ip.h"
 
 #define CUBRID_PASS_OPEN_TAG         "<<<:"
 #define CUBRID_PASS_OPEN_TAG_LEN     strlen(CUBRID_PASS_OPEN_TAG)
@@ -43,10 +50,39 @@
 #define CUBRID_PASS_CLOSE_TAG_LEN    strlen(CUBRID_PASS_CLOSE_TAG)
 
 
-T_USER_TOKEN_INFO *user_token_info = NULL;
-
 int
 dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)
+{
+  /*
+   * zero dbmt_user up front, before even trying the lock
+   */
+  memset (dbmt_user, 0, sizeof (T_DBMT_USER));
+
+  file_resource_guard guard (*cm_cmdb_pass_mutex (), FID_LOCK_DBMT_PASS);
+  if (!guard.ok ())
+    {
+      strcpy (_dbmt_error, "internal lock error");
+      return ERR_WITH_MSG;
+    }
+
+  return dbmt_user_read_locked (dbmt_user, _dbmt_error);
+}
+
+/*
+ * dbmt_user_read_locked ()/dbmt_user_write_auth_locked ()/
+ * dbmt_user_write_pass_locked () - the caller must already hold
+ *   a file_resource_guard on cm_cmdb_pass_mutex () (FID_LOCK_DBMT_PASS) for
+ *   the whole read-modify-write sequence, not just for each individual call.
+ *   usage:
+ *     file_resource_guard guard (*cm_cmdb_pass_mutex (), FID_LOCK_DBMT_PASS);
+ *     if (guard.ok () && dbmt_user_read_locked (&dbmt_user, _dbmt_error) == ERR_NO_ERROR)
+ *       {
+ *         ... modify dbmt_user in memory ...
+ *         dbmt_user_write_auth_locked (&dbmt_user, _dbmt_error);
+ *       }
+ */
+int
+dbmt_user_read_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error)
 {
   T_DBMT_USER_INFO *user_info = NULL;
   T_DBMT_USER_DBINFO *user_dbinfo = NULL;
@@ -60,15 +96,8 @@ dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)
   char strbuf[1024];
   char cur_user[DBMT_USER_NAME_LEN];
   int retval = ERR_NO_ERROR;
-  int lock_fd;
 
   memset (dbmt_user, 0, sizeof (T_DBMT_USER));
-
-  lock_fd = uCreateLockFile (conf_get_dbmt_file (FID_LOCK_DBMT_PASS, strbuf));
-  if (lock_fd < 0)
-    {
-      return ERR_TMPFILE_OPEN_FAIL;
-    }
 
   fp = fopen (conf_get_dbmt_file (FID_DBMT_CUBRID_PASS, strbuf), "r");
   if (fp == NULL)
@@ -91,15 +120,19 @@ dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)
 	      continue;
 	    }
 
-	  user_info =
-		  (T_DBMT_USER_INFO *) increase_capacity (user_info,
-		      sizeof (T_DBMT_USER_INFO), num_dbmt_user,
-		      num_dbmt_user + 1);
-	  if (user_info == NULL)
-	    {
-	      retval = ERR_MEM_ALLOC;
-	      goto read_dbmt_user_error;
-	    }
+	  {
+	    size_t new_size = sizeof (T_DBMT_USER_INFO) * (num_dbmt_user + 1);
+	    T_DBMT_USER_INFO *tmp = (T_DBMT_USER_INFO *)
+				    (user_info == NULL ? malloc (new_size) : realloc (user_info, new_size));
+
+	    if (tmp == NULL)
+	      {
+		retval = ERR_MEM_ALLOC;
+		goto read_dbmt_user_error;
+	      }
+	    memset (tmp + num_dbmt_user, 0, sizeof (T_DBMT_USER_INFO));
+	    user_info = tmp;
+	  }
 	  num_dbmt_user++;
 
 	  /* user name set */
@@ -247,6 +280,8 @@ dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)
   dbmt_user->num_dbmt_user = num_dbmt_user;
   dbmt_user->user_info = user_info;
 
+  user_info = NULL;
+
   fp = fopen (conf_get_dbmt_file (FID_DBMT_PASS, strbuf), "r");
   if (fp == NULL)
     {
@@ -278,7 +313,6 @@ dbmt_user_read (T_DBMT_USER *dbmt_user, char *_dbmt_error)
     }
   fclose (fp);
 
-  uRemoveLockFile (lock_fd);
   return ERR_NO_ERROR;
 
 read_dbmt_user_error:
@@ -288,7 +322,10 @@ read_dbmt_user_error:
     }
   if (user_info != NULL)
     {
-      free (user_info);
+      T_DBMT_USER tmp_user;
+      tmp_user.num_dbmt_user = num_dbmt_user;
+      tmp_user.user_info = user_info;
+      dbmt_user_free (&tmp_user);
     }
   if (user_authinfo != NULL)
     {
@@ -299,7 +336,6 @@ read_dbmt_user_error:
       free (user_dbinfo);
     }
   dbmt_user_free (dbmt_user);
-  uRemoveLockFile (lock_fd);
 
   return retval;
 }
@@ -329,20 +365,34 @@ dbmt_user_free (T_DBMT_USER *dbmt_user)
 int
 dbmt_user_write_auth (T_DBMT_USER *dbmt_user, char *_dbmt_error)
 {
+  file_resource_guard guard (*cm_cmdb_pass_mutex (), FID_LOCK_DBMT_PASS);
+  if (!guard.ok ())
+    {
+      strcpy (_dbmt_error, "internal lock error");
+      return ERR_WITH_MSG;
+    }
+
+  return dbmt_user_write_auth_locked (dbmt_user, _dbmt_error);
+}
+
+/* see the usage note on the declaration in cm_user.h */
+int
+dbmt_user_write_auth_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error)
+{
   FILE *fp;
   char tmpfile[PATH_MAX];
   int i, j;
   char strbuf[1024];
-  int lock_fd;
 
 #if !defined (DO_NOT_USE_CUBRIDENV)
-  make_temp_filepath (tmpfile, sco.szCubrid, "DBMT_util_pass", TS_USER_WRITE_AUTH, PATH_MAX);
+  gen_tempfile_path (tmpfile, sco.szCubrid, "DBMT_util_pass", TS_USER_WRITE_AUTH, PATH_MAX);
 #else
-  make_temp_filepath (tmpfile, CUBRID_TMPDIR, "DBMT_util_pass", TS_USER_WRITE_AUTH, PATH_MAX);
+  gen_tempfile_path (tmpfile, CUBRID_TMPDIR, "DBMT_util_pass", TS_USER_WRITE_AUTH, PATH_MAX);
 #endif
   fp = fopen (tmpfile, "w");
   if (fp == NULL)
     {
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "%s", tmpfile);
       return ERR_TMPFILE_OPEN_FAIL;
     }
   for (i = 0; i < dbmt_user->num_dbmt_user; i++)
@@ -378,16 +428,39 @@ dbmt_user_write_auth (T_DBMT_USER *dbmt_user, char *_dbmt_error)
       fprintf (fp, "%s%s\n", CUBRID_PASS_CLOSE_TAG,
 	       dbmt_user->user_info[i].user_name);
     }
-  fclose (fp);
 
-  lock_fd = uCreateLockFile (conf_get_dbmt_file (FID_LOCK_DBMT_PASS, strbuf));
-  if (lock_fd < 0)
+  /*
+   * a short write (e.g. a full disk) must not replace cmdb.pass with a
+   * truncated copy, and a failed replace must reach the caller: tasks that
+   * change a database report it as a warning that cmdb.pass needs a manual
+   * check.
+   */
+  bool write_failed = (ferror (fp) != 0);
+  if (fclose (fp) != 0)
+    {
+      write_failed = true;
+    }
+  if (write_failed)
     {
       unlink (tmpfile);
-      return ERR_TMPFILE_OPEN_FAIL;
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "cannot write the new cmdb.pass to %s", tmpfile);
+      LOG_ERROR ("dbmt_user_write_auth_locked : %s", _dbmt_error);
+      return ERR_WITH_MSG;
     }
-  move_file (tmpfile, conf_get_dbmt_file (FID_DBMT_CUBRID_PASS, strbuf));
-  uRemoveLockFile (lock_fd);
+
+  if (move_file (tmpfile, conf_get_dbmt_file (FID_DBMT_CUBRID_PASS, strbuf)) != 0)
+    {
+      /* keep tmpfile: a failed copy fallback may have truncated cmdb.pass */
+      /* the precisions keep the message within DBMT_ERROR_MSG_SIZE (-Wformat-truncation) */
+      snprintf (_dbmt_error, DBMT_ERROR_MSG_SIZE, "cannot replace %.1000s; the new content is kept in %.3900s",
+		strbuf, tmpfile);
+      /*
+       * callers such as createdb and copydb replace _dbmt_error with their own
+       * warning, so the error log is where the kept file can be found
+       */
+      LOG_ERROR ("dbmt_user_write_auth_locked : %s", _dbmt_error);
+      return ERR_WITH_MSG;
+    }
 
   return ERR_NO_ERROR;
 }
@@ -417,6 +490,183 @@ dbmt_user_set_authinfo (T_DBMT_USER_AUTHINFO *authinfo, const char *domain,
 {
   strcpy_limit (authinfo->domain, domain, sizeof (authinfo->domain));
   strcpy_limit (authinfo->auth, auth, sizeof (authinfo->auth));
+}
+
+static T_DBMT_USER_AUTHINFO *
+find_authinfo (const T_DBMT_USER_INFO *usrinfo, const char *domain)
+{
+  for (int i = 0; i < usrinfo->num_authinfo; i++)
+    {
+      if (strcmp (usrinfo->authinfo[i].domain, domain) == 0)
+	{
+	  return &usrinfo->authinfo[i];
+	}
+    }
+  return NULL;
+}
+
+static bool
+authinfo_is (const T_DBMT_USER_INFO *usrinfo, const char *domain,
+	     const char *value)
+{
+  T_DBMT_USER_AUTHINFO *ai = find_authinfo (usrinfo, domain);
+
+  return ai != NULL && strcmp (ai->auth, value) == 0;
+}
+
+bool
+dbmt_user_get_user_auth (const T_DBMT_USER_INFO *usrinfo, unsigned int *auth)
+{
+  T_DBMT_USER_AUTHINFO *ai;
+
+  if (usrinfo == NULL)
+    {
+      return false;
+    }
+
+  ai = find_authinfo (usrinfo, "user_auth");
+  if (ai == NULL)
+    {
+      return false;
+    }
+
+  if (auth != NULL)
+    {
+      *auth = (unsigned int) strtoul (ai->auth, NULL, 10);
+    }
+  return true;
+}
+
+unsigned int
+dbmt_user_legacy_auth_bits (const T_DBMT_USER_INFO *usrinfo)
+{
+  unsigned int auth = 0;
+
+  if (usrinfo == NULL)
+    {
+      return 0;
+    }
+
+  if (authinfo_is (usrinfo, "dbcreate", "admin"))
+    {
+      auth |= AU_DBC;
+    }
+  if (authinfo_is (usrinfo, "unicas", "admin"))
+    {
+      auth |= AU_BRK;
+    }
+  if (authinfo_is (usrinfo, "statusmonitorauth", "admin"))
+    {
+      auth |= AU_MON;
+    }
+
+  return auth;
+}
+
+/*
+ * dbmt_user_has_auth () - the CMS user user_id (the caller's _ID) has AU_ADMIN
+ *   or one of the bits in `required`, read from cmdb.pass now. For a task that
+ *   the task table opens wider (e.g. AU_ANY) but that has an option needing
+ *   more; the same rule as ext_ut_validate_auth (). False for an unknown user
+ *   or when cmdb.pass cannot be read.
+ */
+bool
+dbmt_user_has_auth (const char *user_id, unsigned int required)
+{
+  T_DBMT_USER dbmt_user;
+  char dbmt_error[DBMT_ERROR_MSG_SIZE];
+  unsigned int auth = 0;
+  bool found = false;
+
+  if (user_id == NULL || dbmt_user_read (&dbmt_user, dbmt_error) != ERR_NO_ERROR)
+    {
+      return false;
+    }
+
+  for (int i = 0; i < dbmt_user.num_dbmt_user; i++)
+    {
+      if (strcmp (dbmt_user.user_info[i].user_name, user_id) == 0)
+	{
+	  auth = dbmt_user_effective_auth (&dbmt_user.user_info[i]);
+	  found = true;
+	  break;
+	}
+    }
+  dbmt_user_free (&dbmt_user);
+
+  return found && ((auth & AU_ADMIN) || (auth & required));
+}
+
+unsigned int
+dbmt_user_effective_auth (const T_DBMT_USER_INFO *usrinfo)
+{
+  unsigned int auth = 0;
+
+  if (usrinfo == NULL)
+    {
+      return 0;
+    }
+
+  if (!dbmt_user_get_user_auth (usrinfo, &auth))
+    {
+      /* legacy account: no user_auth entry */
+      auth = dbmt_user_legacy_auth_bits (usrinfo) | AU_DBO | AU_JOB;
+    }
+
+  if (strcmp (usrinfo->user_name, "admin") == 0)
+    {
+      auth |= AU_ADMIN;
+    }
+
+  return auth;
+}
+
+void
+dbmt_user_sync_user_auth (T_DBMT_USER_INFO *usrinfo, unsigned int changed_mask)
+{
+  static const struct
+  {
+    unsigned int bit;
+    const char *domain;
+  } bit_domains[] =
+  {
+    {AU_DBC, "dbc"},
+    {AU_BRK, "brk"},
+    {AU_MON, "mon"}
+  };
+  T_DBMT_USER_AUTHINFO *ai;
+  unsigned int auth, legacy;
+
+  changed_mask &= (AU_DBC | AU_BRK | AU_MON);
+  if (usrinfo == NULL || changed_mask == 0)
+    {
+      return;
+    }
+
+  ai = find_authinfo (usrinfo, "user_auth");
+  if (ai == NULL)
+    {
+      return;
+    }
+
+  legacy = dbmt_user_legacy_auth_bits (usrinfo);
+  auth = (unsigned int) strtoul (ai->auth, NULL, 10);
+  auth = (auth & ~changed_mask) | (legacy & changed_mask);
+  snprintf (ai->auth, sizeof (ai->auth), "%u", auth);
+
+  for (size_t i = 0; i < sizeof (bit_domains) / sizeof (bit_domains[0]); i++)
+    {
+      if ((changed_mask & bit_domains[i].bit) == 0)
+	{
+	  continue;
+	}
+      ai = find_authinfo (usrinfo, bit_domains[i].domain);
+      if (ai != NULL)
+	{
+	  strcpy_limit (ai->auth, (auth & bit_domains[i].bit) ? "yes" : "no",
+			sizeof (ai->auth));
+	}
+    }
 }
 
 void
@@ -452,14 +702,28 @@ dbmt_user_search (T_DBMT_USER_INFO *user_info, const char *dbname)
 int
 dbmt_user_write_pass (T_DBMT_USER *dbmt_user, char *_dbmt_error)
 {
+  file_resource_guard guard (*cm_cmdb_pass_mutex (), FID_LOCK_DBMT_PASS);
+  if (!guard.ok ())
+    {
+      strcpy (_dbmt_error, "internal lock error");
+      return ERR_WITH_MSG;
+    }
+
+  return dbmt_user_write_pass_locked (dbmt_user, _dbmt_error);
+}
+
+/* see the usage note on the declaration in cm_user.h */
+int
+dbmt_user_write_pass_locked (T_DBMT_USER *dbmt_user, char *_dbmt_error)
+{
   char tmpfile[PATH_MAX], strbuf[1024];
   FILE *fp;
-  int i, lock_fd;
+  int i;
 
 #if !defined (DO_NOT_USE_CUBRIDENV)
-  make_temp_filepath (tmpfile, sco.szCubrid, "DBMT_util_pass", TS_USER_WRITE_PASS, PATH_MAX);
+  gen_tempfile_path (tmpfile, sco.szCubrid, "DBMT_util_pass", TS_USER_WRITE_PASS, PATH_MAX);
 #else
-  make_temp_filepath (tmpfile, CUBRID_TMPDIR, "DBMT_util_pass", TS_USER_WRITE_PASS, PATH_MAX);
+  gen_tempfile_path (tmpfile, CUBRID_TMPDIR, "DBMT_util_pass", TS_USER_WRITE_PASS, PATH_MAX);
 #endif
 
   fp = fopen (tmpfile, "w");
@@ -478,14 +742,7 @@ dbmt_user_write_pass (T_DBMT_USER *dbmt_user, char *_dbmt_error)
     }
   fclose (fp);
 
-  lock_fd = uCreateLockFile (conf_get_dbmt_file (FID_LOCK_DBMT_PASS, strbuf));
-  if (lock_fd < 0)
-    {
-      unlink (tmpfile);
-      return ERR_TMPFILE_OPEN_FAIL;
-    }
   move_file (tmpfile, conf_get_dbmt_file (FID_DBMT_PASS, strbuf));
-  uRemoveLockFile (lock_fd);
 
   return ERR_NO_ERROR;
 }
@@ -531,6 +788,216 @@ dbmt_user_add_dbinfo (T_DBMT_USER_INFO *usrinfo, T_DBMT_USER_DBINFO *dbinfo)
   return ERR_NO_ERROR;
 }
 
+/*
+ * Session store.
+ *
+ * Sessions live only here, in an in-memory map keyed by the (opaque) token.
+ * Keying by token - not by user id - lets one user hold several sessions at
+ * once. Each session also carries the DB-login information saved through
+ * dbmtuserlogin, which is wiped when the session is removed.
+ *
+ * session_map_mutex ()/session_map_guard guard the map against concurrent
+ * access. It has two very different callers:
+ *   - HTTP request threads read it (dbmt_user_search_token_info_by_token ()
+ *     and friends, via ext_ut_validate_token ()) while holding cm_mutex
+ *     (cm_lock_guard in cm_server_interface.cpp).
+ *   - "login"/"logout" run in their OWN per-request worker thread (registered
+ *     in task_info [], not ext_task_info [] - see cm_execute_request_async ()
+ *     in cm_server_interface.cpp), completely outside cm_mutex, and
+ *     insert/delete entries.
+ */
+
+struct cm_session
+{
+  T_USER_TOKEN_INFO info;
+  time_t last_access;
+  /* dbname -> (db user, db password) saved by dbmtuserlogin */
+  std::map<std::string, std::pair<std::string, std::string> > db_logins;
+  /* request addresses a session IP warning was logged for, oldest first, at
+   * most SESSION_IP_WARNED_MAX (cm_session_ip.h) */
+  std::deque<std::string> warned_ips;
+};
+
+/* token -> session */
+static std::map<std::string, cm_session> g_sessions;
+
+static mutex_t *
+session_map_mutex (void)
+{
+  struct holder
+  {
+    mutex_t m;
+    holder (void)
+    {
+      mutex_init (m);
+    }
+    ~holder (void)
+    {
+      /*
+       * deliberately empty
+       */
+    }
+  };
+  static holder h;
+
+  return &h.m;
+}
+
+/*
+ * session_map_guard - minimal RAII wrapper around session_map_mutex ().
+ */
+class session_map_guard
+{
+  public:
+    session_map_guard (void)
+    {
+      mutex_lock (*session_map_mutex ());
+    }
+
+    ~session_map_guard (void)
+    {
+      mutex_unlock (*session_map_mutex ());
+    }
+
+  private:
+    session_map_guard (const session_map_guard &);
+    session_map_guard &operator= (const session_map_guard &);
+};
+
+/*
+ * wipe_string () - overwrite a string's contents before it is dropped, so a
+ *   DB password does not linger in freed memory.
+ */
+static void
+wipe_string (std::string &s)
+{
+  if (!s.empty ())
+    {
+      volatile char *p = const_cast<volatile char *> (s.data ());
+      for (size_t i = 0; i < s.size (); ++i)
+	{
+	  p[i] = '\0';
+	}
+    }
+  s.clear ();
+}
+
+static void
+wipe_session_dblogins (cm_session &sess)
+{
+  std::map<std::string, std::pair<std::string, std::string> >::iterator it;
+  for (it = sess.db_logins.begin (); it != sess.db_logins.end (); ++it)
+    {
+      wipe_string (it->second.first);
+      wipe_string (it->second.second);
+    }
+  sess.db_logins.clear ();
+}
+
+/*
+ * session_active_time_unlocked () - the token_active_time (seconds) read
+ *   from cm.conf by uReadSystemConfig ().
+ */
+static time_t
+session_active_time_unlocked (void)
+{
+  return (time_t) (sco.iTokenActiveTime > 0 ? sco.iTokenActiveTime : DEFAULT_TOKEN_ACTIVE_TIME);
+}
+
+/*
+ * session_max_per_user_unlocked () - the configured max_sessions_per_user
+ *   (1 for one session per user).
+ *   An invalid value stops CMS at startup (uCheckSystemConfig ()), so the
+ *   clamp to [1, 64] here is only a safeguard.
+ */
+#define SESSION_MIN_PER_USER MIN_MAX_SESSIONS_PER_USER
+#define SESSION_MAX_PER_USER MAX_MAX_SESSIONS_PER_USER
+#define SESSION_DEFAULT_PER_USER DEFAULT_MAX_SESSIONS_PER_USER
+
+static int
+session_max_per_user_unlocked (void)
+{
+  int n = SESSION_DEFAULT_PER_USER;
+
+  if (sco.szMaxSessionsPerUser[0] != '\0')
+    {
+      n = atoi (sco.szMaxSessionsPerUser);
+    }
+  if (n < SESSION_MIN_PER_USER)
+    {
+      n = SESSION_MIN_PER_USER;
+    }
+  if (n > SESSION_MAX_PER_USER)
+    {
+      n = SESSION_MAX_PER_USER;
+    }
+  return n;
+}
+
+/*
+ * purge_expired_unlocked () - drop every session whose last_access is older
+ *   than the active-time window.
+ */
+static void
+purge_expired_unlocked (time_t now_time)
+{
+  time_t active_time = session_active_time_unlocked ();
+  std::map<std::string, cm_session>::iterator it = g_sessions.begin ();
+
+  while (it != g_sessions.end ())
+    {
+      if (now_time - it->second.last_access > active_time)
+	{
+	  wipe_session_dblogins (it->second);
+	  g_sessions.erase (it++);
+	}
+      else
+	{
+	  ++it;
+	}
+    }
+}
+
+/*
+ * evict_lru_if_over_limit_unlocked () - if user_id already holds the maximum
+ *   number of sessions, remove that user's least-recently-used one so a new
+ *   session can be added.
+ */
+static void
+evict_lru_if_over_limit_unlocked (const char *user_id)
+{
+  int limit = session_max_per_user_unlocked ();
+  int count = 0;
+  std::map<std::string, cm_session>::iterator it;
+  std::map<std::string, cm_session>::iterator lru = g_sessions.end ();
+
+  for (it = g_sessions.begin (); it != g_sessions.end (); ++it)
+    {
+      if (strcmp (it->second.info.user_id, user_id) == 0)
+	{
+	  ++count;
+	  if (lru == g_sessions.end ()
+	      || it->second.last_access < lru->second.last_access)
+	    {
+	      lru = it;
+	    }
+	}
+    }
+
+  if (count >= limit && lru != g_sessions.end ())
+    {
+      wipe_session_dblogins (lru->second);
+      g_sessions.erase (lru);
+    }
+}
+
+/*
+ * dbmt_user_new_token_info () - add a new session keyed by token_enc.
+ *   Several sessions may exist for the same user_id. Expired sessions are
+ *   purged first; if the user is already at the per-user limit the
+ *   least-recently-used session of that user is evicted to make room.
+ *   return: ERR_NO_ERROR, or ERR_MEM_ALLOC on failure.
+ */
 int
 dbmt_user_new_token_info (const char *user_id,
 			  const char *user_ip,
@@ -542,174 +1009,242 @@ dbmt_user_new_token_info (const char *user_id,
 #endif
 			  time_t login_time)
 {
-  T_USER_TOKEN_INFO *end_node;
-  T_USER_TOKEN_INFO *new_node;
-
-  if (! (new_node = dbmt_user_search_token_info (user_id)))
+  if (user_id == NULL || user_ip == NULL || user_port == NULL
+      || token_enc == NULL)
     {
-      new_node = (T_USER_TOKEN_INFO *) malloc (sizeof (T_USER_TOKEN_INFO));
-      if (new_node == NULL)
-	{
-	  return ERR_MEM_ALLOC;
-	}
-
-      if (user_token_info == NULL)
-	{
-	  end_node = user_token_info = new_node;
-	}
-      else
-	{
-	  end_node = user_token_info->prev;
-	}
-      end_node->next = new_node;
-      new_node->next = user_token_info;
-      new_node->prev = end_node;
-      user_token_info->prev = new_node;
+      return ERR_MEM_ALLOC;
     }
 
-  strncpy (new_node->user_id, user_id, sizeof (new_node->user_id) - 1);
-  new_node->user_id[sizeof (new_node->user_id) - 1] = '\0';
-  strncpy (new_node->user_ip, user_ip, sizeof (new_node->user_ip) - 1);
-  new_node->user_ip[sizeof (new_node->user_ip) - 1] = '\0';
-  strncpy (new_node->user_port, user_port, sizeof (new_node->user_port) - 1);
-  new_node->user_port[sizeof (new_node->user_port) - 1] = '\0';
-  strncpy (new_node->token, token_enc, sizeof (new_node->token) - 1);
-  new_node->token[sizeof (new_node->token) - 1] = '\0';
-  new_node->proc_id = proc_id;
-  new_node->login_time = login_time;
+  session_map_guard guard;
+
+  purge_expired_unlocked (login_time);
+  evict_lru_if_over_limit_unlocked (user_id);
+
+  std::map<std::string, cm_session>::iterator it;
+  try
+    {
+      it = g_sessions.insert (std::make_pair (std::string (token_enc), cm_session ())).first;
+    }
+  catch (const std::bad_alloc &)
+    {
+      return ERR_MEM_ALLOC;
+    }
+  cm_session &sess = it->second;
+
+  memset (&sess.info, 0, sizeof (sess.info));
+  strncpy (sess.info.user_id, user_id, sizeof (sess.info.user_id) - 1);
+  strncpy (sess.info.user_ip, user_ip, sizeof (sess.info.user_ip) - 1);
+  strncpy (sess.info.user_port, user_port, sizeof (sess.info.user_port) - 1);
+  strncpy (sess.info.token, token_enc, sizeof (sess.info.token) - 1);
+  sess.info.proc_id = proc_id;
+  sess.info.login_time = login_time;
+  sess.last_access = login_time;
 
   return ERR_NO_ERROR;
 }
 
-T_USER_TOKEN_INFO *
-dbmt_user_search_token_info (const char *user_id)
+/*
+ * Look a session up by its token (the only unambiguous key now that a user
+ * may have many sessions). Copies the connection fields into *out.
+ */
+bool
+dbmt_user_search_token_info_by_token (const char *token, T_USER_TOKEN_INFO *out)
 {
-  T_USER_TOKEN_INFO *head = user_token_info;
-
-  if (user_id == NULL)
+  if (token == NULL || out == NULL)
     {
-      return NULL;
+      return false;
     }
 
-  if (head == NULL)
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
     {
-      ut_access_log (NULL, "user_token_info is null.");
-      return NULL;
+      return false;
     }
 
-  do
-    {
-      if (!strcmp (head->user_id, user_id))
-	{
-	  return head;
-	}
-
-      head = head->next;
-
-    }
-  while (head != user_token_info);
-
-  return NULL;
+  *out = it->second.info;
+  return true;
 }
 
-T_USER_TOKEN_INFO *
-dbmt_user_search_token_info_by_token (const char *token)
+/* Update last-access time of the session identified by token. */
+bool
+dbmt_user_touch_token_login_time_by_token (const char *token, time_t now_time)
 {
-  T_USER_TOKEN_INFO *head = user_token_info;
-
   if (token == NULL)
     {
-      return NULL;
+      return false;
     }
 
-  if (head == NULL)
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
     {
-      ut_access_log (NULL, "user_token_info is null.");
-      return NULL;
+      return false;
     }
 
-  do
-    {
-      if (!strcmp (head->token, token))
-	{
-	  return head;
-	}
-
-      head = head->next;
-
-    }
-  while (head != user_token_info);
-
-  return NULL;
-
+  it->second.info.login_time = now_time;
+  it->second.last_access = now_time;
+  return true;
 }
 
-T_USER_TOKEN_INFO *
-dbmt_user_delete_token_info (const char *user_id)
+/*
+ * Whether to log a session IP warning for a request from addr in the session
+ * of token: only when addr is not among the addresses warned about recently
+ * (ut_session_ip_should_warn ()). true when the session is not found, so that
+ * nothing is left unlogged.
+ */
+bool
+dbmt_user_session_ip_should_warn (const char *token, const char *addr)
 {
-  T_USER_TOKEN_INFO *removed_node = NULL;
-
-  if (user_id == NULL)
+  if (token == NULL)
     {
-      return NULL;
+      return true;
     }
 
+  session_map_guard guard;
 
-  if ((removed_node = dbmt_user_search_token_info (user_id)) == NULL)
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
     {
-      return NULL;
+      return true;
     }
 
-  if (removed_node == user_token_info)
-    {
-      if (user_token_info->next != user_token_info)
-	{
-	  user_token_info = user_token_info->next;
-	}
-      else
-	{
-	  user_token_info = NULL;
-	}
-    }
-
-  removed_node->prev->next = removed_node->next;
-  removed_node->next->prev = removed_node->prev;
-
-  return removed_node;
-
+  return ut_session_ip_should_warn (it->second.warned_ips, addr);
 }
 
-T_USER_TOKEN_INFO *
+/* Delete one session by its token (e.g. logout). */
+bool
 dbmt_user_delete_token_info_by_token (const char *token)
 {
-  T_USER_TOKEN_INFO *removed_node = NULL;
-
   if (token == NULL)
     {
-      return NULL;
+      return false;
     }
 
-  if ((removed_node = dbmt_user_search_token_info_by_token (token)) == NULL)
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
     {
-      return NULL;
+      return false;
     }
 
-  if (removed_node == user_token_info)
+  wipe_session_dblogins (it->second);
+  g_sessions.erase (it);
+  return true;
+}
+
+/*
+ * Delete every session that has expired (token_active_time) by now, wiping
+ * its DB logins. Called periodically, so that an expired session and its DB
+ * passwords do not stay in memory until the next login.
+ */
+void
+dbmt_user_purge_expired_sessions (time_t now_time)
+{
+  session_map_guard guard;
+
+  purge_expired_unlocked (now_time);
+}
+
+/*
+ * Delete every session of a user: the user is deleted (deletedbmtuser) or
+ * its sessions are closed by force (force_logout). The DB logins of the
+ * removed sessions are wiped. Returns the number of sessions removed.
+ */
+int
+dbmt_user_delete_all_sessions_of_user (const char *user_id)
+{
+  int removed = 0;
+
+  if (user_id == NULL)
     {
-      if (user_token_info->next != user_token_info)
+      return 0;
+    }
+
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.begin ();
+  while (it != g_sessions.end ())
+    {
+      if (strcmp (it->second.info.user_id, user_id) == 0)
 	{
-	  user_token_info = user_token_info->next;
+	  wipe_session_dblogins (it->second);
+	  g_sessions.erase (it++);
+	  ++removed;
 	}
       else
 	{
-	  user_token_info = NULL;
+	  ++it;
 	}
-
     }
 
-  removed_node->prev->next = removed_node->next;
-  removed_node->next->prev = removed_node->prev;
+  return removed;
+}
 
-  return removed_node;
+/*
+ * Per-session DB-login store. dbmtuserlogin saves the DB user/password for a
+ * dbname into the caller's own session; request handling later reads it back
+ * for that same session only. Values are held in the C++ session object and
+ * wiped when the session is removed.
+ */
+bool
+dbmt_user_session_set_dblogin (const char *token, const char *dbname,
+			       const char *dbuser, const char *dbpasswd)
+{
+  if (token == NULL || dbname == NULL || dbuser == NULL || dbpasswd == NULL)
+    {
+      return false;
+    }
 
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
+    {
+      return false;
+    }
+
+  std::pair<std::string, std::string> &cred = it->second.db_logins[dbname];
+  wipe_string (cred.first);
+  wipe_string (cred.second);
+  cred.first = dbuser;
+  cred.second = dbpasswd;
+  return true;
+}
+
+bool
+dbmt_user_session_get_dblogin (const char *token, const char *dbname,
+			       char *dbuser, size_t dbuser_size,
+			       char *dbpasswd, size_t dbpasswd_size)
+{
+  if (token == NULL || dbname == NULL
+      || dbuser == NULL || dbpasswd == NULL
+      || dbuser_size == 0 || dbpasswd_size == 0)
+    {
+      return false;
+    }
+
+  session_map_guard guard;
+
+  std::map<std::string, cm_session>::iterator it = g_sessions.find (token);
+  if (it == g_sessions.end ())
+    {
+      return false;
+    }
+
+  std::map<std::string, std::pair<std::string, std::string> >::iterator dit =
+	  it->second.db_logins.find (dbname);
+  if (dit == it->second.db_logins.end ())
+    {
+      return false;
+    }
+
+  strncpy (dbuser, dit->second.first.c_str (), dbuser_size - 1);
+  dbuser[dbuser_size - 1] = '\0';
+  strncpy (dbpasswd, dit->second.second.c_str (), dbpasswd_size - 1);
+  dbpasswd[dbpasswd_size - 1] = '\0';
+  return true;
 }

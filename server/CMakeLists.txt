@@ -64,11 +64,6 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.cmake
 set(CMS_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(CMS_EXTERNAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external)
 
-# RSA bits of the shipped self-signed certificate. 1024 is not offered: OpenSSL 3.x
-# refuses to even load such a certificate ("ee key too small"), so a build configured
-# that way would produce a manager whose HTTPS never comes up.
-set(CMS_SSL_RSA_BITS 2048)
-
 # --------------------------------------------------------------------------- version
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/BUILD_NUMBER CMS_BUILD_NUMBER_FILE)
 string(STRIP "${CMS_BUILD_NUMBER_FILE}" CMS_BUILD_NUMBER_FILE)
@@ -121,11 +116,10 @@ if(CMS_STANDALONE)
 else()
   # Public headers of the libraries this links against are not installed yet at build
   # time, so read them off the targets.
-  get_target_property(CMS_CCI_HEADER cascci PUBLIC_HEADER)
   get_target_property(CMS_CMDEP_HEADER cmdep PUBLIC_HEADER)
   get_target_property(CMS_CMSTAT_HEADER cmstat PUBLIC_HEADER)
   set(CMS_CUBRID_INCLUDES "")
-  foreach(header ${CMS_CCI_HEADER} ${CMS_CMDEP_HEADER} ${CMS_CMSTAT_HEADER})
+  foreach(header ${CMS_CMDEP_HEADER} ${CMS_CMSTAT_HEADER})
     get_filename_component(header_dir ${header} DIRECTORY)
     list(APPEND CMS_CUBRID_INCLUDES ${header_dir})
   endforeach()
@@ -161,9 +155,20 @@ set(CMS_VERSION_DEFS
   )
 set(CMS_WARN_FLAGS -Wall -W -Wwrite-strings -Wno-cast-qual -Wno-unused -pthread)
 
+# This directory resets CMAKE_C_FLAGS/CMAKE_CXX_FLAGS above, so the -Wno flags that
+# build.sh exports for Clang never reach these targets. cm_compress.h is an
+# amalgamated copy of miniz and its initializer lists narrow char to mz_uint8, which
+# Clang rejects outright rather than warning about.
+#
+# -Wno-unused covers -Wunused-parameter under GCC but not under Clang, so the opt-out
+# is only needed, and only applied, for Clang.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  list(APPEND CMS_WARN_FLAGS -Wno-c++11-narrowing -Wno-unused-parameter)
+endif()
+
 # ---------------------------------------------------------------------------- targets
 set(CM_ADMIN_SOURCES
-  ${CMS_SRC_DIR}/cm_text_encryption.c
+  ${CMS_SRC_DIR}/cm_text_encryption.cpp
   ${CMS_SRC_DIR}/cm_config.cpp
   ${CMS_SRC_DIR}/cm_server_util.cpp
   ${CMS_SRC_DIR}/cm_user.cpp
@@ -171,15 +176,18 @@ set(CM_ADMIN_SOURCES
   ${CMS_SRC_DIR}/cm_cmd_util.cpp
   ${CMS_SRC_DIR}/cm_connect_info.cpp
   ${CMS_SRC_DIR}/cm_cmd_task.cpp
+  ${CMS_SRC_DIR}/cm_server_status.cpp
   )
 
 set(CUB_MANAGER_SOURCES
   ${CMS_SRC_DIR}/cm_server_util.cpp
   ${CMS_SRC_DIR}/cm_autojob.cpp
-  ${CMS_SRC_DIR}/cm_text_encryption.c
+  ${CMS_SRC_DIR}/cm_text_encryption.cpp
   ${CMS_SRC_DIR}/cm_config.cpp
   ${CMS_SRC_DIR}/cm_job_task.cpp
   ${CMS_SRC_DIR}/cm_cmd_exec.cpp
+  ${CMS_SRC_DIR}/cm_server_status.cpp
+  ${CMS_SRC_DIR}/cm_mem_cpu_stat.cpp
   ${CMS_SRC_DIR}/cm_connect_info.cpp
   ${CMS_SRC_DIR}/cm_auto_task.cpp
   ${CMS_SRC_DIR}/cm_httpd.cpp
@@ -189,14 +197,18 @@ set(CUB_MANAGER_SOURCES
   ${CMS_SRC_DIR}/cm_server_extend_interface.cpp
   ${CMS_SRC_DIR}/cm_server_interface.cpp
   ${CMS_SRC_DIR}/cm_server_autoupdate.cpp
+  ${CMS_SRC_DIR}/cm_ssl_cert.cpp
+  ${CMS_SRC_DIR}/cm_session_ip.cpp
   )
 
 add_executable(cm_admin ${CM_ADMIN_SOURCES})
 target_compile_definitions(cm_admin PRIVATE
   ${CMS_SYS_DEFS} ${CMS_COMMON_DEFS} ${CMS_VERSION_DEFS} _FILE_OFFSET_BITS=64)
 target_compile_options(cm_admin PRIVATE ${CMS_WARN_FLAGS})
-target_include_directories(cm_admin PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMS_SRC_DIR} ${CMS_CUBRID_INCLUDES})
-target_link_libraries(cm_admin PRIVATE ${CMS_CUBRID_LIBS} Threads::Threads)
+target_include_directories(cm_admin PRIVATE
+  ${CMAKE_CURRENT_BINARY_DIR} ${CMS_SRC_DIR} ${CMS_CUBRID_INCLUDES} ${CMS_OPENSSL_INCLUDES})
+target_link_libraries(cm_admin PRIVATE
+  ${CMS_CUBRID_LIBS} ${CMS_OPENSSL_LIBS} Threads::Threads ${CMAKE_DL_LIBS})
 
 add_executable(cub_manager ${CUB_MANAGER_SOURCES})
 target_compile_definitions(cub_manager PRIVATE
@@ -219,6 +231,7 @@ target_link_libraries(cub_manager PRIVATE
 target_link_options(cub_manager PRIVATE -no-pie)
 
 if(NOT CMS_STANDALONE)
+  add_dependencies(cm_admin ${LIBOPENSSL_TARGET})
   add_dependencies(cub_manager ${LIBOPENSSL_TARGET})
 endif()
 
@@ -239,27 +252,6 @@ file(GLOB CMS_CONF_FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/*.conf
 install(FILES ${CMS_CONF_FILES}
   DESTINATION ${CMS_CONFDIR} COMPONENT Manager)
 
-install(FILES
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_2048.crt
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_2048.key
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_1024.crt
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_1024.key
-  DESTINATION ${CMS_CONFDIR} COMPONENT Manager)
-
-file(MD5 ${CMAKE_CURRENT_SOURCE_DIR}/cmserver/conf/cm_ssl_cert_${CMS_SSL_RSA_BITS}.crt
-     CMS_DEFAULT_CERT_MD5)
-message(STATUS "Default certificate MD5 (RSA ${CMS_SSL_RSA_BITS}): ${CMS_DEFAULT_CERT_MD5}")
-target_compile_definitions(cub_manager PRIVATE
-  CMS_DEFAULT_CERT_MD5="${CMS_DEFAULT_CERT_MD5}")
-
-# cm_ssl_cert.{crt,key} is the name the manager opens; keep it a link to the sized pair
-# the way the automake build did.
-install(CODE "
-  set(cms_conf \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMS_CONFDIR}\")
-  execute_process(COMMAND \${CMAKE_COMMAND} -E rm -f
-    \"\${cms_conf}/cm_ssl_cert.crt\" \"\${cms_conf}/cm_ssl_cert.key\")
-  execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
-    cm_ssl_cert_${CMS_SSL_RSA_BITS}.crt \"\${cms_conf}/cm_ssl_cert.crt\")
-  execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
-    cm_ssl_cert_${CMS_SSL_RSA_BITS}.key \"\${cms_conf}/cm_ssl_cert.key\")
-  " COMPONENT Manager)
+# The TLS key pair (conf/cm_ssl_cert.crt, conf/cm_ssl_cert.key) is not installed:
+# cub_manager generates one when it first starts (ssl_cert_auto_generate in cm.conf),
+# and an existing one is left as it is.

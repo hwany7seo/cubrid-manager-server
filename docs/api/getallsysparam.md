@@ -2,12 +2,16 @@
 
 Get configuration files.
 
+Permissions required to run this task: none (any logged-in user)
+
+* `confname` other than the listed names reads `$CUBRID/conf/<confname>`; a protected file such as `cm.pass` is refused (see [File Access](README.md#file-access)).
+
 ## Request JSON Syntax
 
 | **Key** | **Description** |
 | --- | --- |
 | task | task name |
-| token | token string encrypted. |
+| token | token returned by login |
 | confname | cubridconf, cmconf, haconf, databases |
 
 ## Request Sample
@@ -71,9 +75,10 @@ conflist is composed of objects with following structure
             "cm_process_monitor_interval=5",
             "",
             "#",
-            "# Allowing Multiple connection with one CUBRID Manager user.",
+            "# Maximum number of sessions (logins) one CUBRID Manager user can hold at once.",
+            "# An integer from 1 to 64, default 16; set 1 for one session per user.",
             "#",
-            "allow_user_multi_connection=YES",
+            "#max_sessions_per_user=16",
             "",
             "###############################",
             "# diagnostics parameter",
@@ -95,9 +100,24 @@ conflist is composed of objects with following structure
             "auto_job_timeout=43200",
             "",
             "#",
-            "# Define token active time(session timeout), default value is 7200.",
+            "# Define token active time (session timeout) in seconds, default value is 7200.",
+            "# An integer from 1 to 2147483647; any other value is logged and 7200 is used.",
             "#",
             "#token_active_time=7200",
+            "",
+            "#",
+            "# Compare the IP address of each request with the IP address its session",
+            "# logged in from (off/log/enforce), default log.",
+            "#   off     : do not compare.",
+            "#   log     : on a mismatch, write a warning to the log and process the request.",
+            "#   enforce : on a mismatch, write a warning to the log, reject the request as",
+            "#             an invalid token and delete the session.",
+            "# Set enforce only when each client has a fixed IP address and does not share",
+            "# its token with other hosts: behind a proxy pool, or with clients that share",
+            "# one token, valid requests come from different addresses.",
+            "# Any other value is logged and log is used.",
+            "#",
+            "#session_ip_check=log",
             "",
             "#",
             "# support monitoring statistic (YES/NO), default NO",
