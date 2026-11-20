@@ -205,6 +205,13 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/CUBRID" "$GITHUB_WORKSPACE/.ccache"
           chown -R cubrid:cubrid "$GITHUB_WORKSPACE"
 
+      # Compiler warnings in the manager server's own sources become warning
+      # annotations on the run and on the changed lines of the pull request.
+      # The matcher only takes paths under cubridmanager/server, so the
+      # engine's warnings are left out. The job does not fail on them.
+      - name: Annotate manager server compiler warnings
+        run: echo "::add-matcher::$GITHUB_WORKSPACE/cubrid/cubridmanager/.github/problem-matchers/cms-gcc.json"
+
       - name: Build CUBRID with this manager server
         run: |
           set -euo pipefail
@@ -224,10 +231,12 @@ jobs:
           # set -e is dropped around the build so that the statistics below are
           # printed on a failure too: a cache that stopped being hit is
           # invisible otherwise, and the run only looks slower for no reason.
+          # The output is also kept in build.log, from which the manager
+          # server's warnings are counted after the build.
           set +e
           ./build.sh -m release -g ninja -j "$JAVA_HOME" \
-            -p "$WORKSPACE/CUBRID" build
-          rc=$?
+            -p "$WORKSPACE/CUBRID" build 2>&1 | tee "$WORKSPACE/build.log"
+          rc=${PIPESTATUS[0]}
           set -e
           echo "===== ccache"
           ccache --show-stats | grep -E 'cache hit|cache miss|cache size|files in cache'
@@ -273,6 +282,39 @@ jobs:
           fi
           test -x "$GITHUB_WORKSPACE/CUBRID/bin/cub_manager" \
             || { echo "cub_manager was not built"; exit 1; }
+
+      # GitHub shows only the first 10 warning annotations of a step, so the
+      # full count and list go to the run summary as well. A warning in a
+      # header is reported once for every source that includes it, hence the
+      # sort -u.
+      - name: Count manager server compiler warnings
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "::remove-matcher owner=cms-gcc::"
+          log="$GITHUB_WORKSPACE/build.log"
+          [ -f "$log" ] || { echo "no build.log; the build did not start"; exit 0; }
+          grep -E '/cubridmanager/server/[^:]+:[0-9]+:[0-9]+: warning: ' "$log" \
+            | sed -E 's|^.*/cubridmanager/||' | sort -u > /tmp/cms-warnings.txt
+          count=$(wc -l < /tmp/cms-warnings.txt)
+          echo "manager server compiler warnings: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "### Manager server build: no compiler warnings" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "::warning title=Manager server build::$count compiler warning(s) in cubridmanager/server (see the summary)"
+          {
+            echo "### Manager server build: ⚠️ $count compiler warning(s)"
+            echo
+            echo "<details><summary>warnings</summary>"
+            echo
+            echo '```'
+            head -100 /tmp/cms-warnings.txt
+            echo '```'
+            echo
+            echo "</details>"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # A build from source installs this repository's own cm.conf, which has
       # support_mon_statistic=NO, while the released packages ship YES. With it
