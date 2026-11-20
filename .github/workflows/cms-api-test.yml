@@ -11,10 +11,16 @@ name: CMS API test
 # branch as an input, and a bare version there means the release branch of
 # that version: 11.4 is read as release/11.4.
 #
+# In a fork it also runs on every push, so that a branch can be checked there
+# before a pull request is opened. A push to the upstream repository itself
+# is skipped; there it runs on pull requests and on demand only.
+#
 
 on:
   pull_request:
     branches: [develop]
+  push:
+    branches: ['**']
   workflow_dispatch:
     inputs:
       engine_repo:
@@ -55,6 +61,9 @@ env:
 
 jobs:
   cms-api-test:
+    if: >-
+      github.event_name != 'push' ||
+      github.repository != 'CUBRID/cubrid-manager-server'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     container:
