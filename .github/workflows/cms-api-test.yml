@@ -81,7 +81,32 @@ jobs:
       - name: Install the toolchain and test dependencies
         run: |
           set -euo pipefail
-          dnf -y install epel-release
+          # Take every Rocky repository from dl.rockylinux.org instead of the
+          # mirrorlist. dnf picks a mirror for each repository on its own, and
+          # a mirror that lags behind gives a BaseOS without the libgcc and
+          # libstdc++ that the newer gcc in AppStream needs ("nothing provides
+          # libgcc >= 8.5.0-31.el8_10").
+          sed -i -e 's/^mirrorlist=/#mirrorlist=/' \
+                 -e 's|^#\?baseurl=http://dl\.rockylinux\.org/|baseurl=https://dl.rockylinux.org/|' \
+                 /etc/yum.repos.d/Rocky-*.repo
+
+          # Retry with fresh metadata when an install fails: the metadata can
+          # be caught in the middle of an update.
+          dnf_install() {
+            local i
+            for i in 1 2 3; do
+              if dnf -y install "$@"; then
+                return 0
+              fi
+              [ "$i" -lt 3 ] || break
+              echo "dnf install failed (attempt $i of 3), retrying with fresh metadata"
+              dnf clean all
+              sleep 10
+            done
+            return 1
+          }
+
+          dnf_install epel-release
           # ninja-build and systemtap-sdt-devel live in CodeReady Builder,
           # which is off by default.
           /usr/bin/crb enable 2>/dev/null \
@@ -89,7 +114,7 @@ jobs:
             || dnf -y config-manager --set-enabled crb \
             || echo "could not enable CRB; some packages may be missing"
 
-          dnf -y install \
+          dnf_install \
             git gcc gcc-c++ make bison flex ccache \
             libtool autoconf automake patch file which rsync tar gzip xz curl unzip \
             ncurses-devel expat-devel zlib-devel systemtap-sdt-devel \
